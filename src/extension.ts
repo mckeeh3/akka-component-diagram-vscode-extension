@@ -206,20 +206,22 @@ function getWebviewContent(data: SerializableDiagramData): string {
 			<script src="https://cdn.tailwindcss.com"></script>
 			<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 			<style>
-				body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; }
-				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; }
+				body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; cursor: grab; }
+				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; user-select: none; }
 				.node-title { font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.3); margin-bottom: 4px; text-align: center; }
 				.node-type { font-size: 0.75rem; text-align: center; opacity: 0.8; }
 				.node-port { width: 12px; height: 12px; border: 1px solid #E2E8F0; border-radius: 50%; position: absolute; background-color: #A0AEC0; top: 50%; transform: translateY(-50%); }
 				.port-in { left: -6px; }
 				.port-out { right: -6px; }
-				#canvas-container { pointer-events: none; }
+				#viewport { transform-origin: 0 0; }
 			</style>
 		</head>
 		<body class="bg-gray-700">
 			<div id="diagram-root" class="w-full h-screen relative">
-				<canvas id="diagram-canvas" class="absolute inset-0"></canvas>
-				<div id="node-container" class="absolute inset-0"></div>
+                <div id="viewport">
+				    <canvas id="diagram-canvas" class="absolute inset-0"></canvas>
+				    <div id="node-container" class="absolute inset-0"></div>
+                </div>
 			</div>
 
 			<script>
@@ -231,10 +233,18 @@ function getWebviewContent(data: SerializableDiagramData): string {
 
 				const canvas = document.getElementById('diagram-canvas');
 				const nodeContainer = document.getElementById('node-container');
+                const viewport = document.getElementById('viewport');
+                const diagramRoot = document.getElementById('diagram-root');
 				const ctx = canvas.getContext('2d');
 				
 				let draggingNode = null;
 				let dragOffsetX, dragOffsetY;
+
+                let scale = 1;
+                let panX = 0;
+                let panY = 0;
+                let isPanning = false;
+                let lastPanPosition = { x: 0, y: 0 };
 
 				const componentColors = { 'HttpEndpoint': 'bg-purple-600', 'GrpcEndpoint': 'bg-purple-700', 'EventSourcedEntity': 'bg-green-600', 'KeyValueEntity': 'bg-teal-600', 'View': 'bg-blue-600', 'Workflow': 'bg-orange-600', 'Consumer': 'bg-yellow-600', 'Topic': 'bg-gray-500', 'ServiceStream': 'bg-gray-500', 'Unknown': 'bg-gray-600' };
 
@@ -246,7 +256,7 @@ function getWebviewContent(data: SerializableDiagramData): string {
 						node.y = node.y !== undefined ? node.y : 50 + index * 40;
 						createNodeElement(node);
 					});
-					requestAnimationFrame(drawEdges);
+					drawEdges();
 				}
 
 				function createNodeElement(node) {
@@ -268,9 +278,18 @@ function getWebviewContent(data: SerializableDiagramData): string {
 				}
 
 				function drawEdges() {
-					const container = document.getElementById('diagram-root');
-					canvas.width = container.clientWidth;
-					canvas.height = container.clientHeight;
+                    // Make canvas large enough to contain all content, then let CSS scale it
+                    const padding = 200;
+                    let maxX = 0, maxY = 0;
+                    nodes.forEach(n => {
+                        if (n.x + 200 > maxX) maxX = n.x + 200;
+                        if (n.y + 100 > maxY) maxY = n.y + 100;
+                    });
+                    canvas.width = maxX + padding;
+                    canvas.height = maxY + padding;
+                    viewport.style.width = canvas.width + 'px';
+                    viewport.style.height = canvas.height + 'px';
+
 					ctx.clearRect(0, 0, canvas.width, canvas.height);
 					ctx.strokeStyle = '#A0AEC0';
 					ctx.lineWidth = 2;
@@ -310,6 +329,10 @@ function getWebviewContent(data: SerializableDiagramData): string {
 						}
 					});
 				}
+
+                function updateTransform() {
+                    viewport.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${scale})\`;
+                }
 				
 				function onDragStart(e) {
 					const nodeEl = e.target.closest('.node');
@@ -317,8 +340,8 @@ function getWebviewContent(data: SerializableDiagramData): string {
 					const id = nodeEl.id.replace('node-', '');
 					draggingNode = nodes.find(n => n.id === id);
 					if (draggingNode) {
-						dragOffsetX = e.clientX - draggingNode.element.offsetLeft;
-						dragOffsetY = e.clientY - draggingNode.element.offsetTop;
+						dragOffsetX = e.clientX / scale - draggingNode.x;
+						dragOffsetY = e.clientY / scale - draggingNode.y;
 						document.addEventListener('mousemove', onDrag);
 						document.addEventListener('mouseup', onDragEnd);
 					}
@@ -327,8 +350,8 @@ function getWebviewContent(data: SerializableDiagramData): string {
 				function onDrag(e) {
 					if (!draggingNode) return;
 					e.preventDefault();
-					draggingNode.x = e.clientX - dragOffsetX;
-					draggingNode.y = e.clientY - dragOffsetY;
+					draggingNode.x = e.clientX / scale - dragOffsetX;
+					draggingNode.y = e.clientY / scale - dragOffsetY;
 					draggingNode.element.style.left = draggingNode.x + 'px';
 					draggingNode.element.style.top = draggingNode.y + 'px';
 					requestAnimationFrame(drawEdges);
@@ -336,20 +359,60 @@ function getWebviewContent(data: SerializableDiagramData): string {
 
 				function onDragEnd() {
 					if (!draggingNode) return;
-					// Save the new position
-					const layoutToSave = {
-						[draggingNode.id]: { x: draggingNode.x, y: draggingNode.y }
-					};
+					const layoutToSave = { [draggingNode.id]: { x: draggingNode.x, y: draggingNode.y } };
 					vscode.postMessage({ command: 'saveLayout', payload: layoutToSave });
-
 					draggingNode = null;
 					document.removeEventListener('mousemove', onDrag);
 					document.removeEventListener('mouseup', onDragEnd);
 				}
 				
+                // --- Pan and Zoom Handlers ---
+                diagramRoot.addEventListener('wheel', e => {
+                    e.preventDefault();
+                    const zoomIntensity = 0.1;
+                    const direction = e.deltaY < 0 ? 1 : -1;
+                    const oldScale = scale;
+                    scale += direction * zoomIntensity * scale;
+                    scale = Math.max(0.1, Math.min(4, scale));
+
+                    const rect = diagramRoot.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    panX = mouseX - (mouseX - panX) * (scale / oldScale);
+                    panY = mouseY - (mouseY - panY) * (scale / oldScale);
+
+                    updateTransform();
+                });
+
+                diagramRoot.addEventListener('mousedown', e => {
+                    if (e.button === 1) { // Middle mouse button
+                        isPanning = true;
+                        lastPanPosition = { x: e.clientX, y: e.clientY };
+                        diagramRoot.style.cursor = 'grabbing';
+                    }
+                });
+
+                diagramRoot.addEventListener('mousemove', e => {
+                    if (isPanning) {
+                        const dx = e.clientX - lastPanPosition.x;
+                        const dy = e.clientY - lastPanPosition.y;
+                        panX += dx;
+                        panY += dy;
+                        lastPanPosition = { x: e.clientX, y: e.clientY };
+                        updateTransform();
+                    }
+                });
+
+                window.addEventListener('mouseup', e => {
+                     if (isPanning) {
+                        isPanning = false;
+                        diagramRoot.style.cursor = 'grab';
+                    }
+                });
+
 				window.addEventListener('resize', drawEdges);
 				render();
-
 			</script>
 		</body>
 		</html>
