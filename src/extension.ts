@@ -6,6 +6,8 @@ interface AkkaComponent {
 	name: string; // The component name from the annotation (e.g., "customer")
 	type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
 	uri: vscode.Uri; // The URI of the file where the component is defined
+	x?: number; // Optional X coordinate for layout
+	y?: number; // Optional Y coordinate for layout
 }
 
 interface AkkaEdge {
@@ -81,16 +83,12 @@ export function activate(context: vscode.ExtensionContext) {
 			const document = await vscode.workspace.openTextDocument(sourceNode.uri);
 			const text = document.getText();
 			
-			// New, more robust parsing strategy
-			// 1. Find all `.method()` calls.
-			// 2. Work backwards to verify they are from a componentClient.
 			const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
 			const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
 			
 			let match;
 			while((match = methodCallRegex.exec(text)) !== null) {
 				const methodRef = match[1];
-				// Clean up multiline formatting that can break the regex
                 const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
 				
 				if (clientCallRegex.test(cleanedPrecedingText)) {
@@ -108,7 +106,6 @@ export function activate(context: vscode.ExtensionContext) {
 			const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
 			const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
 
-			// Consume annotations
 			while((match = consumeRegex.exec(text)) !== null) {
 				const [_, fromType, fromClass, fromString] = match;
 				const consumeSource = fromClass || fromString;
@@ -124,7 +121,6 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 			}
 
-			// Produce annotations
 			while((match = produceRegex.exec(text)) !== null) {
 				const [_, toType, toName] = match;
 				if(!parsedNodes.has(toName)) {
@@ -135,21 +131,28 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 
-		// De-duplicate edges to keep the diagram clean
+		// De-duplicate edges
 		const uniqueEdges = foundEdges.filter((edge, index, self) =>
 			index === self.findIndex((e) => (
 				e.source === edge.source && e.target === edge.target && e.label === edge.label
 			))
 		);
 
+		// --- Load saved layout from workspace state ---
+		const savedLayout = context.workspaceState.get<{[id: string]: {x: number, y: number}}>('akkaDiagramLayout', {});
+		const nodesWithLayout = Array.from(parsedNodes.values()).map(node => ({
+			...node,
+			...savedLayout[node.id] // Apply saved coordinates if they exist
+		}));
+
 		const diagramData: DiagramData = {
-			nodes: Array.from(parsedNodes.values()),
+			nodes: nodesWithLayout,
 			edges: uniqueEdges
 		};
 
 		// --- Step 3: Create the Webview Panel ---
 		if (diagramData.nodes.length > 0) {
-			createDiagramPanel(context.extensionUri, diagramData);
+			createDiagramPanel(context, diagramData);
 		} else {
 			vscode.window.showWarningMessage('No Akka components found in this project.');
 		}
@@ -159,28 +162,38 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 
-function createDiagramPanel(extensionUri: vscode.Uri, data: DiagramData) {
+function createDiagramPanel(context: vscode.ExtensionContext, data: DiagramData) {
 	const panel = vscode.window.createWebviewPanel(
-		'akkaDiagram', // Identifies the type of the webview. Used internally
-		'Akka Component Diagram', // Title of the panel displayed to the user
-		vscode.ViewColumn.One, // Editor column to show the new webview panel in.
-		{
-			enableScripts: true // Enable javascript in the webview
-		}
+		'akkaDiagram', 
+		'Akka Component Diagram',
+		vscode.ViewColumn.One, 
+		{ enableScripts: true }
 	);
 
-	// Create a serializable version of the data by removing the vscode.Uri objects.
+	// Handle messages from the webview to save layout
+	panel.webview.onDidReceiveMessage(
+		message => {
+			switch (message.command) {
+				case 'saveLayout':
+					const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
+					const newLayout = { ...currentLayout, ...message.payload };
+					context.workspaceState.update('akkaDiagramLayout', newLayout);
+					return;
+			}
+		},
+		undefined,
+		context.subscriptions
+	);
+
 	const serializableData: SerializableDiagramData = {
-		nodes: data.nodes.map(({ id, name, type }) => ({ id, name, type })),
+		nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
 		edges: data.edges
 	};
 
-	// Set the HTML content for the webview panel
 	panel.webview.html = getWebviewContent(serializableData);
 }
 
 function getWebviewContent(data: SerializableDiagramData): string {
-	// We'll inject the parsed data directly into the HTML for the webview's script to use.
 	const dataJson = JSON.stringify(data);
 
 	return `
@@ -191,48 +204,13 @@ function getWebviewContent(data: SerializableDiagramData): string {
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
 			<title>Akka Flow Diagram</title>
 			<script src="https://cdn.tailwindcss.com"></script>
-			<script src="https://d3js.org/d3.v7.min.js"></script>
 			<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 			<style>
-				body {
-					font-family: 'Inter', sans-serif;
-					margin: 0;
-					padding: 0;
-					overflow: hidden;
-				}
-				.node {
-					border-radius: 8px;
-					color: white;
-					padding: 8px 12px;
-					position: absolute;
-					cursor: move;
-					min-width: 180px;
-					box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-					border: 1px solid rgba(255, 255, 255, 0.2);
-					pointer-events: auto;
-				}
-				.node-title {
-					font-weight: 600;
-					padding-bottom: 4px;
-					border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-					margin-bottom: 4px;
-					text-align: center;
-				}
-				.node-type {
-					font-size: 0.75rem;
-					text-align: center;
-					opacity: 0.8;
-				}
-				.node-port {
-					width: 12px;
-					height: 12px;
-					border: 1px solid #E2E8F0;
-					border-radius: 50%;
-					position: absolute;
-					background-color: #A0AEC0;
-					top: 50%;
-					transform: translateY(-50%);
-				}
+				body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; }
+				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; }
+				.node-title { font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.3); margin-bottom: 4px; text-align: center; }
+				.node-type { font-size: 0.75rem; text-align: center; opacity: 0.8; }
+				.node-port { width: 12px; height: 12px; border: 1px solid #E2E8F0; border-radius: 50%; position: absolute; background-color: #A0AEC0; top: 50%; transform: translateY(-50%); }
 				.port-in { left: -6px; }
 				.port-out { right: -6px; }
 				#canvas-container { pointer-events: none; }
@@ -245,6 +223,8 @@ function getWebviewContent(data: SerializableDiagramData): string {
 			</div>
 
 			<script>
+				const vscode = acquireVsCodeApi();
+
 				const diagramData = ${dataJson};
 				const nodes = diagramData.nodes;
 				const edges = diagramData.edges;
@@ -252,70 +232,45 @@ function getWebviewContent(data: SerializableDiagramData): string {
 				const canvas = document.getElementById('diagram-canvas');
 				const nodeContainer = document.getElementById('node-container');
 				const ctx = canvas.getContext('2d');
-				const diagramRoot = document.getElementById('diagram-root');
 				
-				const componentColors = {
-					'HttpEndpoint': 'bg-purple-600',
-					'GrpcEndpoint': 'bg-purple-700',
-					'EventSourcedEntity': 'bg-green-600',
-					'KeyValueEntity': 'bg-teal-600',
-					'View': 'bg-blue-600',
-					'Workflow': 'bg-orange-600',
-					'Consumer': 'bg-yellow-600',
-					'Topic': 'bg-gray-500',
-					'ServiceStream': 'bg-gray-500',
-					'Unknown': 'bg-gray-600'
-				};
-				
-				// Create HTML elements for each node and bind data
-				nodes.forEach(node => {
+				let draggingNode = null;
+				let dragOffsetX, dragOffsetY;
+
+				const componentColors = { 'HttpEndpoint': 'bg-purple-600', 'GrpcEndpoint': 'bg-purple-700', 'EventSourcedEntity': 'bg-green-600', 'KeyValueEntity': 'bg-teal-600', 'View': 'bg-blue-600', 'Workflow': 'bg-orange-600', 'Consumer': 'bg-yellow-600', 'Topic': 'bg-gray-500', 'ServiceStream': 'bg-gray-500', 'Unknown': 'bg-gray-600' };
+
+				function render() {
+					nodeContainer.innerHTML = '';
+					nodes.forEach((node, index) => {
+						// Use saved coordinates, or place new nodes in a default spot
+						node.x = node.x !== undefined ? node.x : 50;
+						node.y = node.y !== undefined ? node.y : 50 + index * 40;
+						createNodeElement(node);
+					});
+					requestAnimationFrame(drawEdges);
+				}
+
+				function createNodeElement(node) {
 					const el = document.createElement('div');
 					el.id = 'node-' + node.id;
 					const colorClass = componentColors[node.type] || componentColors['Unknown'];
 					el.className = 'node ' + colorClass;
+					el.style.left = node.x + 'px';
+					el.style.top = node.y + 'px';
 					el.innerHTML = \`
 						<div class="node-title">\${node.id}</div>
 						<div class="node-type">\${node.name} (\${node.type})</div>
 						<div class="node-port port-in"></div>
 						<div class="node-port port-out"></div>
 					\`;
-					// FIX: Manually bind the node data object to the DOM element for D3
-					el.__data__ = node;
+					el.addEventListener('mousedown', onDragStart);
 					nodeContainer.appendChild(el);
 					node.element = el;
-				});
-
-
-				// --- D3 Force Simulation ---
-				const linkForce = d3.forceLink(edges)
-					.id(d => d.id)
-					.distance(300) // increase distance between nodes
-					.strength(0.5);
-
-				const simulation = d3.forceSimulation(nodes)
-					.force("link", linkForce)
-					.force("charge", d3.forceManyBody().strength(-2500)) // push nodes apart more strongly
-					.force("center", d3.forceCenter(diagramRoot.clientWidth / 2, diagramRoot.clientHeight / 2))
-					.on("tick", ticked);
-				
-				function ticked() {
-					// Update HTML node positions
-					nodes.forEach(node => {
-						const el = node.element;
-						// Keep nodes within the bounds of the container
-						node.x = Math.max(0, Math.min(diagramRoot.clientWidth - el.offsetWidth, node.x));
-						node.y = Math.max(0, Math.min(diagramRoot.clientHeight - el.offsetHeight, node.y));
-						el.style.left = node.x + 'px';
-						el.style.top = node.y + 'px';
-					});
-					
-					// Redraw canvas edges
-					drawEdges();
 				}
 
 				function drawEdges() {
-					canvas.width = diagramRoot.clientWidth;
-					canvas.height = diagramRoot.clientHeight;
+					const container = document.getElementById('diagram-root');
+					canvas.width = container.clientWidth;
+					canvas.height = container.clientHeight;
 					ctx.clearRect(0, 0, canvas.width, canvas.height);
 					ctx.strokeStyle = '#A0AEC0';
 					ctx.lineWidth = 2;
@@ -324,15 +279,15 @@ function getWebviewContent(data: SerializableDiagramData): string {
 					ctx.textAlign = 'center';
 
 					edges.forEach(edge => {
-						const sourceNode = edge.source;
-						const targetNode = edge.target;
-						
+						const sourceNode = nodes.find(n => n.id === edge.source);
+						const targetNode = nodes.find(n => n.id === edge.target);
 						if (sourceNode && targetNode && sourceNode.element && targetNode.element) {
-							const startX = sourceNode.x + sourceNode.element.offsetWidth;
-							const startY = sourceNode.y + sourceNode.element.offsetHeight / 2;
-							const endX = targetNode.x;
-							const endY = targetNode.y + targetNode.element.offsetHeight / 2;
-							
+							const sourceElem = sourceNode.element;
+							const targetElem = targetNode.element;
+							const startX = sourceElem.offsetLeft + sourceElem.offsetWidth;
+							const startY = sourceElem.offsetTop + sourceElem.offsetHeight / 2;
+							const endX = targetElem.offsetLeft;
+							const endY = targetElem.offsetTop + targetElem.offsetHeight / 2;
 							const cp1x = startX + 60;
 							const cp1y = startY;
 							const cp2x = endX - 60;
@@ -344,56 +299,56 @@ function getWebviewContent(data: SerializableDiagramData): string {
 							ctx.stroke();
 
 							const angle = Math.atan2(endY - cp2y, endX - cp2x);
-							ctx.save();
-							ctx.translate(endX, endY);
-							ctx.rotate(angle);
-							ctx.beginPath();
-							ctx.moveTo(0, 0);
-							ctx.lineTo(-10, -5);
-							ctx.lineTo(-10, 5);
-							ctx.closePath();
-							ctx.fill();
+							ctx.save(); ctx.translate(endX, endY); ctx.rotate(angle);
+							ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-10, -5); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
 							ctx.restore();
 
 							if (edge.label) {
-								const midX = (startX + endX) / 2;
-								const midY = (startY + endY) / 2 - 10;
-								ctx.save();
-								ctx.fillStyle = '#CBD5E0';
-								ctx.fillText(edge.label, midX, midY);
-								ctx.restore();
+								const midX = (startX + endX) / 2; const midY = (startY + endY) / 2 - 10;
+								ctx.save(); ctx.fillStyle = '#CBD5E0'; ctx.fillText(edge.label, midX, midY); ctx.restore();
 							}
 						}
 					});
 				}
-
-				// --- Drag and Drop integration with D3 ---
-				d3.selectAll(".node").call(d3.drag()
-					.on("start", dragstarted)
-					.on("drag", dragged)
-					.on("end", dragended));
-
-				function dragstarted(event, d) {
-					if (!event.active) simulation.alphaTarget(0.3).restart();
-					d.fx = d.x;
-					d.fy = d.y;
+				
+				function onDragStart(e) {
+					const nodeEl = e.target.closest('.node');
+					if (!nodeEl) return;
+					const id = nodeEl.id.replace('node-', '');
+					draggingNode = nodes.find(n => n.id === id);
+					if (draggingNode) {
+						dragOffsetX = e.clientX - draggingNode.element.offsetLeft;
+						dragOffsetY = e.clientY - draggingNode.element.offsetTop;
+						document.addEventListener('mousemove', onDrag);
+						document.addEventListener('mouseup', onDragEnd);
+					}
 				}
 
-				function dragged(event, d) {
-					d.fx = event.x;
-					d.fy = event.y;
+				function onDrag(e) {
+					if (!draggingNode) return;
+					e.preventDefault();
+					draggingNode.x = e.clientX - dragOffsetX;
+					draggingNode.y = e.clientY - dragOffsetY;
+					draggingNode.element.style.left = draggingNode.x + 'px';
+					draggingNode.element.style.top = draggingNode.y + 'px';
+					requestAnimationFrame(drawEdges);
 				}
 
-				function dragended(event, d) {
-					if (!event.active) simulation.alphaTarget(0);
-					d.fx = null;
-					d.fy = null;
+				function onDragEnd() {
+					if (!draggingNode) return;
+					// Save the new position
+					const layoutToSave = {
+						[draggingNode.id]: { x: draggingNode.x, y: draggingNode.y }
+					};
+					vscode.postMessage({ command: 'saveLayout', payload: layoutToSave });
+
+					draggingNode = null;
+					document.removeEventListener('mousemove', onDrag);
+					document.removeEventListener('mouseup', onDragEnd);
 				}
 				
-				window.addEventListener('resize', () => {
-					simulation.force("center", d3.forceCenter(diagramRoot.clientWidth / 2, diagramRoot.clientHeight / 2));
-					simulation.alpha(0.3).restart();
-				});
+				window.addEventListener('resize', drawEdges);
+				render();
 
 			</script>
 		</body>
