@@ -3,191 +3,183 @@ import * as vscode from 'vscode';
 // --- Type Definitions ---
 
 interface AkkaComponent {
-	id: string; // The class name, used as a unique ID
-	name: string; // The component name from the annotation (e.g., "customer")
-	type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
-	uri: vscode.Uri; // The URI of the file where the component is defined
-	x?: number; // Optional X coordinate for layout
-	y?: number; // Optional Y coordinate for layout
+  id: string; // The class name, used as a unique ID
+  name: string; // The component name from the annotation (e.g., "customer")
+  type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
+  uri: vscode.Uri; // The URI of the file where the component is defined
+  x?: number; // Optional X coordinate for layout
+  y?: number; // Optional Y coordinate for layout
 }
 
 interface AkkaEdge {
-	source: string;
-	target: string;
-	label: string;
+  source: string;
+  target: string;
+  label: string;
 }
 
 // Data passed from the extension to the webview
 interface SerializableDiagramData {
-    nodes: Omit<AkkaComponent, 'uri'>[];
-    edges: AkkaEdge[];
+  nodes: Omit<AkkaComponent, 'uri'>[];
+  edges: AkkaEdge[];
 }
 
 interface ViewState {
-    panX: number;
-    panY: number;
-    scale: number;
+  panX: number;
+  panY: number;
+  scale: number;
 }
-
 
 // --- Extension Activation ---
 
 export function activate(context: vscode.ExtensionContext) {
+  console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
 
-	console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
+  let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async () => {
+    const javaFiles = await vscode.workspace.findFiles('**/*.java', '**/node_modules/**');
+    if (javaFiles.length === 0) {
+      vscode.window.showWarningMessage('No Java files found in this project.');
+      return;
+    }
 
-	let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async () => {
-		
-		const javaFiles = await vscode.workspace.findFiles('**/*.java', '**/node_modules/**');
-		if (javaFiles.length === 0) {
-			vscode.window.showWarningMessage('No Java files found in this project.');
-			return;
-		}
+    vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
 
-		vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
-		
-		const parsedNodes = await parseNodes(javaFiles);
-		const foundEdges = await parseEdges(parsedNodes);
+    const parsedNodes = await parseNodes(javaFiles);
+    const foundEdges = await parseEdges(parsedNodes);
 
-		// De-duplicate edges
-		const uniqueEdges = foundEdges.filter((edge, index, self) =>
-			index === self.findIndex((e) => (e.source === edge.source && e.target === edge.target && e.label === edge.label))
-		);
+    // De-duplicate edges
+    const uniqueEdges = foundEdges.filter((edge, index, self) => index === self.findIndex((e) => e.source === edge.source && e.target === edge.target && e.label === edge.label));
 
-		// --- Load saved layouts from workspace state ---
-		const savedNodeLayout = context.workspaceState.get<{[id: string]: {x: number, y: number}}>('akkaDiagramLayout', {});
-        const savedViewState = context.workspaceState.get<ViewState>('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+    // --- Load saved layouts from workspace state ---
+    const savedNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaDiagramLayout', {});
+    const savedViewState = context.workspaceState.get<ViewState>('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
 
-		const nodesWithLayout = Array.from(parsedNodes.values()).map(node => ({
-			...node,
-			...savedNodeLayout[node.id] // Apply saved coordinates if they exist
-		}));
+    const nodesWithLayout = Array.from(parsedNodes.values()).map((node) => ({
+      ...node,
+      ...savedNodeLayout[node.id], // Apply saved coordinates if they exist
+    }));
 
-		const diagramData = { nodes: nodesWithLayout, edges: uniqueEdges };
+    const diagramData = { nodes: nodesWithLayout, edges: uniqueEdges };
 
-		// --- Create the Webview Panel ---
-		if (diagramData.nodes.length > 0) {
-			createDiagramPanel(context, diagramData, savedViewState);
-		} else {
-			vscode.window.showWarningMessage('No Akka components found in this project.');
-		}
-	});
+    // --- Create the Webview Panel ---
+    if (diagramData.nodes.length > 0) {
+      createDiagramPanel(context, diagramData, savedViewState);
+    } else {
+      vscode.window.showWarningMessage('No Akka components found in this project.');
+    }
+  });
 
-	context.subscriptions.push(scanProjectDisposable);
+  context.subscriptions.push(scanProjectDisposable);
 }
-
 
 // --- Parsing Functions ---
 
 async function parseNodes(files: vscode.Uri[]): Promise<Map<string, AkkaComponent>> {
-    const parsedNodes = new Map<string, AkkaComponent>();
-    for (const file of files) {
-        const document = await vscode.workspace.openTextDocument(file);
-        const text = document.getText();
-        const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+([\w<>]+))?/g;
-        
-        let match;
-        while ((match = componentRegex.exec(text)) !== null) {
-            const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
-            let componentType: string = (annotationType === 'ComponentId')
-                ? extendedOrImplementedClass?.replace(/<.*>/, '') || 'Unknown'
-                : annotationType;
+  const parsedNodes = new Map<string, AkkaComponent>();
+  for (const file of files) {
+    const document = await vscode.workspace.openTextDocument(file);
+    const text = document.getText();
+    // FIX: Improved regex to capture just the base class name, ignoring generics.
+    const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))/g;
 
-            if (!parsedNodes.has(className)) {
-                parsedNodes.set(className, { 
-                    id: className, 
-                    name: componentId || className, 
-                    type: componentType,
-                    uri: file 
-                });
-            }
-        }
+    let match;
+    while ((match = componentRegex.exec(text)) !== null) {
+      const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
+      let componentType: string = annotationType === 'ComponentId' ? extendedOrImplementedClass || 'Unknown' : annotationType;
+
+      if (!parsedNodes.has(className)) {
+        parsedNodes.set(className, {
+          id: className,
+          name: componentId || className,
+          type: componentType,
+          uri: file,
+        });
+      }
     }
-    return parsedNodes;
+  }
+  return parsedNodes;
 }
 
 async function parseEdges(nodes: Map<string, AkkaComponent>): Promise<AkkaEdge[]> {
-    const foundEdges: AkkaEdge[] = [];
-    for (const sourceNode of nodes.values()) {
-        if (sourceNode.uri.scheme === 'untitled') continue; // Don't parse non-file URIs
-        const document = await vscode.workspace.openTextDocument(sourceNode.uri);
-        const text = document.getText();
-        
-        // Find component client calls
-        const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
-        const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
-        
-        let match;
-        while((match = methodCallRegex.exec(text)) !== null) {
-            const methodRef = match[1];
-            const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
-            if (clientCallRegex.test(cleanedPrecedingText)) {
-                const targetClass = methodRef.split('::')[0];
-                if(nodes.has(targetClass)) {
-                    foundEdges.push({ source: sourceNode.id, target: targetClass, label: 'invoke' });
-                }
-            }
-        }
+  const foundEdges: AkkaEdge[] = [];
+  for (const sourceNode of nodes.values()) {
+    if (sourceNode.uri.scheme === 'untitled') continue; // Don't parse non-file URIs
+    const document = await vscode.workspace.openTextDocument(sourceNode.uri);
+    const text = document.getText();
 
-        // Find consume/produce annotations
-        const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
-        const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
+    // Find component client calls
+    const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
+    const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
 
-        while((match = consumeRegex.exec(text)) !== null) {
-            const [_, fromType, fromClass, fromString] = match;
-            const consumeSource = fromClass || fromString;
-            if (!nodes.has(consumeSource)) {
-                nodes.set(consumeSource, {id: consumeSource, name: consumeSource, type: fromType, uri: vscode.Uri.parse(`untitled:Topic/${consumeSource}`)});
-            }
-            foundEdges.push({ source: consumeSource, target: sourceNode.id, label: 'consumes' });
+    let match;
+    while ((match = methodCallRegex.exec(text)) !== null) {
+      const methodRef = match[1];
+      const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
+      if (clientCallRegex.test(cleanedPrecedingText)) {
+        const targetClass = methodRef.split('::')[0];
+        if (nodes.has(targetClass)) {
+          foundEdges.push({ source: sourceNode.id, target: targetClass, label: 'invoke' });
         }
-
-        while((match = produceRegex.exec(text)) !== null) {
-            const [_, toType, toName] = match;
-            if(!nodes.has(toName)) {
-                nodes.set(toName, { id: toName, name: toName, type: toType, uri: vscode.Uri.parse(`untitled:Topic/${toName}`)});
-            }
-            foundEdges.push({ source: sourceNode.id, target: toName, label: 'produces to'});
-        }
+      }
     }
-    return foundEdges;
-}
 
+    // Find consume/produce annotations
+    const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
+    const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
+
+    while ((match = consumeRegex.exec(text)) !== null) {
+      const [_, fromType, fromClass, fromString] = match;
+      const consumeSource = fromClass || fromString;
+      if (!nodes.has(consumeSource)) {
+        nodes.set(consumeSource, { id: consumeSource, name: consumeSource, type: fromType, uri: vscode.Uri.parse(`untitled:Topic/${consumeSource}`) });
+      }
+      foundEdges.push({ source: consumeSource, target: sourceNode.id, label: 'consumes' });
+    }
+
+    while ((match = produceRegex.exec(text)) !== null) {
+      const [_, toType, toName] = match;
+      if (!nodes.has(toName)) {
+        nodes.set(toName, { id: toName, name: toName, type: toType, uri: vscode.Uri.parse(`untitled:Topic/${toName}`) });
+      }
+      foundEdges.push({ source: sourceNode.id, target: toName, label: 'produces to' });
+    }
+  }
+  return foundEdges;
+}
 
 // --- Webview Panel Creation ---
 
-function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[], edges: AkkaEdge[] }, viewState: ViewState) {
-	const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, { enableScripts: true });
+function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+  const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, { enableScripts: true });
 
-	panel.webview.onDidReceiveMessage(
-		message => {
-			switch (message.command) {
-				case 'saveLayout':
-					const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
-					context.workspaceState.update('akkaDiagramLayout', { ...currentLayout, ...message.payload });
-					return;
-                case 'saveViewState':
-                    context.workspaceState.update('akkaDiagramViewState', message.payload);
-                    return;
-			}
-		},
-		undefined,
-		context.subscriptions
-	);
+  panel.webview.onDidReceiveMessage(
+    (message) => {
+      switch (message.command) {
+        case 'saveLayout':
+          const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
+          context.workspaceState.update('akkaDiagramLayout', { ...currentLayout, ...message.payload });
+          return;
+        case 'saveViewState':
+          context.workspaceState.update('akkaDiagramViewState', message.payload);
+          return;
+      }
+    },
+    undefined,
+    context.subscriptions
+  );
 
-	const serializableData: SerializableDiagramData = {
-		nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
-		edges: data.edges
-	};
+  const serializableData: SerializableDiagramData = {
+    nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
+    edges: data.edges,
+  };
 
-	panel.webview.html = getWebviewContent(serializableData, viewState);
+  panel.webview.html = getWebviewContent(serializableData, viewState);
 }
 
 function getWebviewContent(data: SerializableDiagramData, viewState: ViewState): string {
-	const dataJson = JSON.stringify(data);
-    const viewStateJson = JSON.stringify(viewState);
+  const dataJson = JSON.stringify(data);
+  const viewStateJson = JSON.stringify(viewState);
 
-	return `
+  return `
 		<!DOCTYPE html>
 		<html lang="en">
 		<head>
@@ -238,7 +230,20 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 let isPanning = false;
                 let lastPanPosition = { x: 0, y: 0 };
 
-				const componentColors = { 'HttpEndpoint': 'bg-purple-600', 'GrpcEndpoint': 'bg-purple-700', 'EventSourcedEntity': 'bg-green-600', 'KeyValueEntity': 'bg-teal-600', 'View': 'bg-blue-600', 'Workflow': 'bg-orange-600', 'Consumer': 'bg-yellow-600', 'Topic': 'bg-gray-500', 'ServiceStream': 'bg-gray-500', 'Unknown': 'bg-gray-600' };
+				const componentColors = { 
+                    httpEndpoint: 'bg-purple-600',
+                    grpcEndpoint: 'bg-indigo-600',
+                    eventSourcedEntity: 'bg-green-600',
+                    keyValueEntity: 'bg-emerald-600',
+                    view: 'bg-blue-600',
+                    consumer: 'bg-yellow-600',
+                    workflow: 'bg-orange-600',
+                    timedAction: 'bg-rose-600',
+                    agent: 'bg-pink-600',
+                    topic: 'bg-slate-500',
+                    serviceStream: 'bg-slate-500',
+                    unknown: 'bg-sky-700'
+                };
 
 				function render() {
 					nodeContainer.innerHTML = '';
@@ -254,7 +259,9 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				function createNodeElement(node) {
 					const el = document.createElement('div');
 					el.id = 'node-' + node.id;
-					const colorClass = componentColors[node.type] || componentColors['Unknown'];
+                    // Convert type to camelCase to match the keys in componentColors
+                    const typeKey = node.type.charAt(0).toLowerCase() + node.type.slice(1);
+					const colorClass = componentColors[typeKey] || componentColors['unknown'];
 					el.className = 'node ' + colorClass;
 					el.style.left = node.x + 'px';
 					el.style.top = node.y + 'px';
@@ -410,6 +417,4 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 	`;
 }
 
-
 export function deactivate() {}
-
