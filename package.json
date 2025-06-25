@@ -10,20 +10,25 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:akka-diagram-generator.helloWorld"
+    "onCommand:akka-diagram-generator.scanProject"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "akka-diagram-generator.helloWorld",
-        "title": "Hello Akka Dev!"
-      },
-      {
         "command": "akka-diagram-generator.scanProject",
-        "title": "Scan Project for Akka Components"
+        "title": "Akka: Generate Component Diagram"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "when": "resourceLangId == java || explorerResourceIsFolder",
+          "command": "akka-diagram-generator.scanProject",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
