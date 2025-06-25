@@ -4,264 +4,256 @@ import * as path from 'path';
 // --- Type Definitions ---
 
 interface AkkaComponent {
-	id: string; // The class name, used as a unique ID
-	name: string; // The component name from the annotation (e.g., "customer")
-	type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
-	uri: vscode.Uri; // The URI of the file where the component is defined
-	x?: number; // Optional X coordinate for layout
-	y?: number; // Optional Y coordinate for layout
+  id: string; // The class name, used as a unique ID
+  name: string; // The component name from the annotation (e.g., "customer")
+  type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
+  uri: vscode.Uri; // The URI of the file where the component is defined
+  x?: number; // Optional X coordinate for layout
+  y?: number; // Optional Y coordinate for layout
 }
 
 interface AkkaEdge {
-	source: string;
-	target: string;
-	label: string;
-    details: string[]; // To hold detailed interaction info, e.g., method names
+  source: string;
+  target: string;
+  label: string;
+  details: string[]; // To hold detailed interaction info, e.g., method names
 }
 
 // Data passed from the extension to the webview
 interface SerializableDiagramData {
-    nodes: Omit<AkkaComponent, 'uri'>[];
-    edges: AkkaEdge[];
+  nodes: Omit<AkkaComponent, 'uri'>[];
+  edges: AkkaEdge[];
 }
 
 interface ViewState {
-    panX: number;
-    panY: number;
-    scale: number;
+  panX: number;
+  panY: number;
+  scale: number;
 }
-
 
 // --- Extension Activation ---
 
 export function activate(context: vscode.ExtensionContext) {
+  console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
 
-	console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
+  let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async (uri: vscode.Uri) => {
+    let scanFolder: vscode.WorkspaceFolder | undefined;
+    let relativePath: string;
 
-	let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async (uri: vscode.Uri) => {
-		
-        let scanFolder: vscode.WorkspaceFolder | undefined;
-        let relativePath: string;
+    if (uri) {
+      scanFolder = vscode.workspace.getWorkspaceFolder(uri);
+      if (!scanFolder) {
+        vscode.window.showErrorMessage('Selected file is not part of a workspace folder.');
+        return;
+      }
+      relativePath = path.relative(scanFolder.uri.fsPath, uri.fsPath);
+    } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      scanFolder = vscode.workspace.workspaceFolders[0];
+      relativePath = '';
+    } else {
+      vscode.window.showErrorMessage('No folder open in workspace.');
+      return;
+    }
 
-        if (uri) {
-            scanFolder = vscode.workspace.getWorkspaceFolder(uri);
-            if (!scanFolder) {
-                vscode.window.showErrorMessage("Selected file is not part of a workspace folder.");
-                return;
-            }
-            relativePath = path.relative(scanFolder.uri.fsPath, uri.fsPath);
-        } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-            scanFolder = vscode.workspace.workspaceFolders[0];
-            relativePath = '';
-        } else {
-            vscode.window.showErrorMessage("No folder open in workspace.");
-            return;
-        }
+    const pattern = new vscode.RelativePattern(path.join(scanFolder.uri.fsPath, relativePath), '**/*.java');
+    const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
 
-        const pattern = new vscode.RelativePattern(path.join(scanFolder.uri.fsPath, relativePath), '**/*.java');
-		const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
+    if (javaFiles.length === 0) {
+      vscode.window.showWarningMessage('No Java files found in the selected folder.');
+      return;
+    }
 
-		if (javaFiles.length === 0) {
-			vscode.window.showWarningMessage('No Java files found in the selected folder.');
-			return;
-		}
+    vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
 
-		vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
-		
-		const parsedNodes = await parseNodes(javaFiles);
-		const foundEdges = await parseEdges(parsedNodes);
+    const parsedNodes = await parseNodes(javaFiles);
+    const foundEdges = await parseEdges(parsedNodes);
 
-		const aggregatedEdges = aggregateEdges(foundEdges);
+    const aggregatedEdges = aggregateEdges(foundEdges);
 
-		// --- Load saved layouts from workspace state ---
-		const savedNodeLayout = context.workspaceState.get<{[id: string]: {x: number, y: number}}>('akkaDiagramLayout', {});
-        const savedViewState = context.workspaceState.get<ViewState>('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+    // --- Load saved layouts from workspace state ---
+    const savedNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaDiagramLayout', {});
+    const savedViewState = context.workspaceState.get<ViewState>('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
 
-		const nodesWithLayout = Array.from(parsedNodes.values()).map(node => ({
-			...node,
-			...savedNodeLayout[node.id] // Apply saved coordinates if they exist
-		}));
+    const nodesWithLayout = Array.from(parsedNodes.values()).map((node) => ({
+      ...node,
+      ...savedNodeLayout[node.id], // Apply saved coordinates if they exist
+    }));
 
-		const diagramData = { nodes: nodesWithLayout, edges: aggregatedEdges };
+    const diagramData = { nodes: nodesWithLayout, edges: aggregatedEdges };
 
-		// --- Create the Webview Panel ---
-		if (diagramData.nodes.length > 0) {
-			createDiagramPanel(context, diagramData, savedViewState);
-		} else {
-			vscode.window.showWarningMessage('No Akka components found in this project.');
-		}
-	});
+    // --- Create the Webview Panel ---
+    if (diagramData.nodes.length > 0) {
+      createDiagramPanel(context, diagramData, savedViewState);
+    } else {
+      vscode.window.showWarningMessage('No Akka components found in this project.');
+    }
+  });
 
-	context.subscriptions.push(scanProjectDisposable);
+  context.subscriptions.push(scanProjectDisposable);
 }
-
 
 // --- Parsing Functions ---
 
 async function parseNodes(files: vscode.Uri[]): Promise<Map<string, AkkaComponent>> {
-    const parsedNodes = new Map<string, AkkaComponent>();
-    for (const file of files) {
-        const document = await vscode.workspace.openTextDocument(file);
-        const text = document.getText();
-        const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
-        
-        let match;
-        while ((match = componentRegex.exec(text)) !== null) {
-            const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
-            let componentType: string = (annotationType === 'ComponentId')
-                ? extendedOrImplementedClass || 'Unknown'
-                : annotationType;
+  const parsedNodes = new Map<string, AkkaComponent>();
+  for (const file of files) {
+    const document = await vscode.workspace.openTextDocument(file);
+    const text = document.getText();
+    const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
 
-            if (!parsedNodes.has(className)) {
-                parsedNodes.set(className, { 
-                    id: className, 
-                    name: componentId || className, 
-                    type: componentType,
-                    uri: file 
-                });
-            }
-        }
+    let match;
+    while ((match = componentRegex.exec(text)) !== null) {
+      const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
+      let componentType: string = annotationType === 'ComponentId' ? extendedOrImplementedClass || 'Unknown' : annotationType;
+
+      if (!parsedNodes.has(className)) {
+        parsedNodes.set(className, {
+          id: className,
+          name: componentId || className,
+          type: componentType,
+          uri: file,
+        });
+      }
     }
-    return parsedNodes;
+  }
+  return parsedNodes;
 }
 
 async function parseEdges(nodes: Map<string, AkkaComponent>): Promise<AkkaEdge[]> {
-    const foundEdges: AkkaEdge[] = [];
-    for (const sourceNode of nodes.values()) {
-        if (sourceNode.uri.scheme === 'untitled') continue;
-        const document = await vscode.workspace.openTextDocument(sourceNode.uri);
-        const text = document.getText();
-        
-        const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
-        const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
-        
-        let match;
-        while((match = methodCallRegex.exec(text)) !== null) {
-            const methodRef = match[1];
-            const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
-            if (clientCallRegex.test(cleanedPrecedingText)) {
-                const [targetClass, methodName] = methodRef.split('::');
-                if(nodes.has(targetClass)) {
-                    foundEdges.push({ source: sourceNode.id, target: targetClass, label: methodName, details: [] });
-                }
-            }
-        }
+  const foundEdges: AkkaEdge[] = [];
+  for (const sourceNode of nodes.values()) {
+    if (sourceNode.uri.scheme === 'untitled') continue;
+    const document = await vscode.workspace.openTextDocument(sourceNode.uri);
+    const text = document.getText();
 
-        const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
-        const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
+    const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
+    const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
 
-        while((match = consumeRegex.exec(text)) !== null) {
-            const [_, fromType, fromClass, fromString] = match;
-            const consumeSource = fromClass || fromString;
-            const detailLabel = fromType === 'Topic' || fromType === 'ServiceStream' ? 'consumes' : `${fromType} events`;
-            if (!nodes.has(consumeSource)) {
-                nodes.set(consumeSource, {id: consumeSource, name: consumeSource, type: fromType, uri: vscode.Uri.parse(`untitled:Topic/${consumeSource}`)});
-            }
-            foundEdges.push({ source: consumeSource, target: sourceNode.id, label: detailLabel, details: [] });
+    let match;
+    while ((match = methodCallRegex.exec(text)) !== null) {
+      const methodRef = match[1];
+      const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
+      if (clientCallRegex.test(cleanedPrecedingText)) {
+        const [targetClass, methodName] = methodRef.split('::');
+        if (nodes.has(targetClass)) {
+          foundEdges.push({ source: sourceNode.id, target: targetClass, label: methodName, details: [] });
         }
-
-        while((match = produceRegex.exec(text)) !== null) {
-            const [_, toType, toName] = match;
-            if(!nodes.has(toName)) {
-                nodes.set(toName, { id: toName, name: toName, type: toType, uri: vscode.Uri.parse(`untitled:Topic/${toName}`)});
-            }
-            foundEdges.push({ source: sourceNode.id, target: toName, label: 'produces to', details: []});
-        }
+      }
     }
-    return foundEdges;
+
+    const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
+    const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
+
+    while ((match = consumeRegex.exec(text)) !== null) {
+      const [_, fromType, fromClass, fromString] = match;
+      const consumeSource = fromClass || fromString;
+      const detailLabel = fromType === 'Topic' || fromType === 'ServiceStream' ? 'consumes' : `${fromType} events`;
+      if (!nodes.has(consumeSource)) {
+        nodes.set(consumeSource, { id: consumeSource, name: consumeSource, type: fromType, uri: vscode.Uri.parse(`untitled:Topic/${consumeSource}`) });
+      }
+      foundEdges.push({ source: consumeSource, target: sourceNode.id, label: detailLabel, details: [] });
+    }
+
+    while ((match = produceRegex.exec(text)) !== null) {
+      const [_, toType, toName] = match;
+      if (!nodes.has(toName)) {
+        nodes.set(toName, { id: toName, name: toName, type: toType, uri: vscode.Uri.parse(`untitled:Topic/${toName}`) });
+      }
+      foundEdges.push({ source: sourceNode.id, target: toName, label: 'produces to', details: [] });
+    }
+  }
+  return foundEdges;
 }
 
 function aggregateEdges(edges: AkkaEdge[]): AkkaEdge[] {
-    const edgeMap = new Map<string, AkkaEdge>();
+  const edgeMap = new Map<string, AkkaEdge>();
 
-    edges.forEach(edge => {
-        const key = `${edge.source}->${edge.target}`;
-        const existing = edgeMap.get(key);
+  edges.forEach((edge) => {
+    const key = `${edge.source}->${edge.target}`;
+    const existing = edgeMap.get(key);
 
-        if(existing) {
-            if(edge.label !== 'consumes' && edge.label !== 'produces to' && !existing.details.includes(edge.label)) {
-                existing.details.push(edge.label);
-            }
-        } else {
-            const newEdge: AkkaEdge = {
-                source: edge.source,
-                target: edge.target,
-                label: '', // Will be set later
-                details: []
-            };
-            if(edge.label !== 'consumes' && edge.label !== 'produces to') {
-                newEdge.details.push(edge.label);
-            }
-            edgeMap.set(key, newEdge);
-        }
-    });
+    if (existing) {
+      if (edge.label !== 'consumes' && edge.label !== 'produces to' && !existing.details.includes(edge.label)) {
+        existing.details.push(edge.label);
+      }
+    } else {
+      const newEdge: AkkaEdge = {
+        source: edge.source,
+        target: edge.target,
+        label: '', // Will be set later
+        details: [],
+      };
+      if (edge.label !== 'consumes' && edge.label !== 'produces to') {
+        newEdge.details.push(edge.label);
+      }
+      edgeMap.set(key, newEdge);
+    }
+  });
 
-    return Array.from(edgeMap.values()).map(edge => {
-        if(edge.details.length > 0) {
-            edge.label = `invokes (${edge.details.length} methods)`;
-        } else {
-             // For consume/produce, we don't have method details
-            const originalEdge = edges.find(e => e.source === edge.source && e.target === edge.target);
-            edge.label = originalEdge ? originalEdge.label : '';
-        }
-        return edge;
-    });
+  return Array.from(edgeMap.values()).map((edge) => {
+    if (edge.details.length > 0) {
+      edge.label = `invokes (${edge.details.length} methods)`;
+    } else {
+      const originalEdge = edges.find((e) => e.source === edge.source && e.target === edge.target);
+      edge.label = originalEdge ? originalEdge.label : '';
+    }
+    return edge;
+  });
 }
-
 
 // --- Webview Panel Creation ---
 
-function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[], edges: AkkaEdge[] }, viewState: ViewState) {
-	const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, { 
-        enableScripts: true,
-        retainContextWhenHidden: true
-    });
+function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+  const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
 
-	panel.webview.onDidReceiveMessage(
-		async message => {
-			switch (message.command) {
-				case 'saveLayout':
-					const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
-					context.workspaceState.update('akkaDiagramLayout', { ...currentLayout, ...message.payload });
-					return;
-                case 'saveViewState':
-                    context.workspaceState.update('akkaDiagramViewState', message.payload);
-                    return;
-				case 'navigateTo':
-					const component = data.nodes.find(n => n.id === message.payload.componentId);
-					if (component && component.uri.scheme !== 'untitled') {
-						const document = await vscode.workspace.openTextDocument(component.uri);
-						const editor = await vscode.window.showTextDocument(document);
-						
-						const text = document.getText();
-						const regex = new RegExp(`class\\s+${component.id}`);
-						const match = text.match(regex);
-						if (match && typeof match.index === 'number') {
-							const pos = document.positionAt(match.index);
-							editor.selection = new vscode.Selection(pos, pos);
-							editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-						}
-					}
-					return;
-			}
-		},
-		undefined,
-		context.subscriptions
-	);
+  panel.webview.onDidReceiveMessage(
+    async (message) => {
+      switch (message.command) {
+        case 'saveLayout':
+          const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
+          context.workspaceState.update('akkaDiagramLayout', { ...currentLayout, ...message.payload });
+          return;
+        case 'saveViewState':
+          context.workspaceState.update('akkaDiagramViewState', message.payload);
+          return;
+        case 'navigateTo':
+          const component = data.nodes.find((n) => n.id === message.payload.componentId);
+          if (component && component.uri.scheme !== 'untitled') {
+            const document = await vscode.workspace.openTextDocument(component.uri);
+            const editor = await vscode.window.showTextDocument(document);
 
-	const serializableData: SerializableDiagramData = {
-		nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
-		edges: data.edges
-	};
+            const text = document.getText();
+            const regex = new RegExp(`class\\s+${component.id}`);
+            const match = text.match(regex);
+            if (match && typeof match.index === 'number') {
+              const pos = document.positionAt(match.index);
+              editor.selection = new vscode.Selection(pos, pos);
+              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+            }
+          }
+          return;
+      }
+    },
+    undefined,
+    context.subscriptions
+  );
 
-	panel.webview.html = getWebviewContent(serializableData, viewState);
+  const serializableData: SerializableDiagramData = {
+    nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
+    edges: data.edges,
+  };
+
+  panel.webview.html = getWebviewContent(serializableData, viewState);
 }
 
 function getWebviewContent(data: SerializableDiagramData, viewState: ViewState): string {
-	const dataJson = JSON.stringify(data);
-    const viewStateJson = JSON.stringify(viewState);
+  const dataJson = JSON.stringify(data);
+  const viewStateJson = JSON.stringify(viewState);
 
-	return `
+  return `
 		<!DOCTYPE html>
 		<html lang="en">
 		<head>
@@ -272,6 +264,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 			<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 			<style>
 				body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; cursor: grab; }
+				body.panning { cursor: grabbing; }
 				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; user-select: none; }
 				.node-title { font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.3); margin-bottom: 4px; text-align: center; }
 				.node-type { font-size: 0.75rem; text-align: center; opacity: 0.8; }
@@ -381,6 +374,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				
 				function onDragStart(e) {
 					if (e.button !== 0) return;
+                    e.stopPropagation(); // Prevent pan from starting
 					const nodeEl = e.target.closest('.node');
 					if (!nodeEl) return;
 					const id = nodeEl.id.replace('node-', '');
@@ -429,14 +423,15 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 });
 
                 diagramRoot.addEventListener('mousedown', e => {
-                    if (e.button === 1) { // Middle mouse button
+                    // Start panning if the click is on the background (not a node)
+                    if (e.button === 0 && !e.target.closest('.node')) {
                         isPanning = true;
                         lastPanPosition = { x: e.clientX, y: e.clientY };
-                        diagramRoot.style.cursor = 'grabbing';
+                        document.body.classList.add('panning');
                     }
                 });
 
-                diagramRoot.addEventListener('mousemove', e => {
+                window.addEventListener('mousemove', e => {
                     if (isPanning) {
                         const dx = e.clientX - lastPanPosition.x; const dy = e.clientY - lastPanPosition.y;
                         panX += dx; panY += dy;
@@ -445,18 +440,14 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     } else {
                         // Tooltip logic
                         const rect = viewport.getBoundingClientRect();
-                        const mouseX = (e.clientX - rect.left);
-                        const mouseY = (e.clientY - rect.top);
-
+                        const mouseX = (e.clientX - rect.left); const mouseY = (e.clientY - rect.top);
                         let hoveredEdge = null;
                         for(const hitbox of edgeLabelHitboxes) {
                             if (mouseX >= hitbox.x * scale && mouseX <= (hitbox.x + hitbox.width) * scale &&
                                 mouseY >= hitbox.y * scale && mouseY <= (hitbox.y + hitbox.height) * scale) {
-                                hoveredEdge = hitbox.edge;
-                                break;
+                                hoveredEdge = hitbox.edge; break;
                             }
                         }
-
                         if(hoveredEdge && hoveredEdge.details && hoveredEdge.details.length > 0) {
                             tooltip.innerHTML = '<ul>' + hoveredEdge.details.map(d => '<li>' + d + '</li>').join('') + '</ul>';
                             tooltip.style.left = (e.clientX + 15) + 'px';
@@ -471,7 +462,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 window.addEventListener('mouseup', e => {
                      if (isPanning) {
                         isPanning = false;
-                        diagramRoot.style.cursor = 'grab';
+                        document.body.classList.remove('panning');
                         saveViewState();
                     }
                 });
@@ -484,6 +475,4 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 	`;
 }
 
-
 export function deactivate() {}
-

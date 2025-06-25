@@ -36,8 +36,12 @@ The primary way to use the extension is through the File Explorer context menu.
 ### **Interacting with the Diagram**
 
 * **Navigate to Code**: Left-click on any component node.
-* **Pan the View**: Middle-click and drag the diagram's background.
-* **Zoom the View**: Use the mouse wheel.
+* **Pan the View**:
+  * Mouse: Click and drag on the diagram's background.
+  * Mac Trackpad: Press down with one finger and drag.
+* **Zoom the View**:
+  * Mouse: Use the mouse wheel.
+  * Mac Trackpad: Use a two-finger drag gesture (up to zoom out, down to zoom in) or a pinch-to-zoom gesture.
 * **Rearrange Layout**: Left-click and drag any component node to a new position. The layout is saved automatically.
 
 ## **License**
