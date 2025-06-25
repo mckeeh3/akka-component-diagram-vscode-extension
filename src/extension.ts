@@ -171,10 +171,13 @@ async function parseEdges(nodes: Map<string, AkkaComponent>): Promise<AkkaEdge[]
 // --- Webview Panel Creation ---
 
 function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
-  const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, { enableScripts: true });
+  const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, {
+    enableScripts: true,
+    retainContextWhenHidden: true, // This will prevent the webview from being destroyed when hidden
+  });
 
   panel.webview.onDidReceiveMessage(
-    (message) => {
+    async (message) => {
       switch (message.command) {
         case 'saveLayout':
           const currentLayout = context.workspaceState.get('akkaDiagramLayout', {});
@@ -182,6 +185,22 @@ function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: Akk
           return;
         case 'saveViewState':
           context.workspaceState.update('akkaDiagramViewState', message.payload);
+          return;
+        case 'navigateTo':
+          const component = data.nodes.find((n) => n.id === message.payload.componentId);
+          if (component && component.uri.scheme !== 'untitled') {
+            const document = await vscode.workspace.openTextDocument(component.uri);
+            const editor = await vscode.window.showTextDocument(document);
+
+            const text = document.getText();
+            const regex = new RegExp(`class\\s+${component.id}`);
+            const match = text.match(regex);
+            if (match && typeof match.index === 'number') {
+              const pos = document.positionAt(match.index);
+              editor.selection = new vscode.Selection(pos, pos);
+              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+            }
+          }
           return;
       }
     },
@@ -245,6 +264,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				
 				let draggingNode = null;
 				let dragOffsetX, dragOffsetY;
+                let dragHappened = false;
 
                 let scale = initialViewState.scale;
                 let panX = initialViewState.panX;
@@ -293,6 +313,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 						<div class="node-port port-out"></div>
 					\`;
 					el.addEventListener('mousedown', onDragStart);
+                    el.addEventListener('click', onNodeClick);
 					nodeContainer.appendChild(el);
 					node.element = el;
 				}
@@ -355,6 +376,16 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 function saveViewState() {
                     vscode.postMessage({ command: 'saveViewState', payload: { panX, panY, scale } });
                 }
+
+                function onNodeClick(e) {
+                    if (dragHappened) {
+                        e.stopPropagation();
+                        return;
+                    }
+                    const nodeEl = e.currentTarget;
+					const id = nodeEl.id.replace('node-', '');
+                    vscode.postMessage({ command: 'navigateTo', payload: { componentId: id }});
+                }
 				
 				function onDragStart(e) {
 					if (e.button !== 0) return; // Only drag with left mouse button
@@ -363,6 +394,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 					const id = nodeEl.id.replace('node-', '');
 					draggingNode = nodes.find(n => n.id === id);
 					if (draggingNode) {
+                        dragHappened = false;
 						dragOffsetX = e.clientX / scale - draggingNode.x;
 						dragOffsetY = e.clientY / scale - draggingNode.y;
 						document.addEventListener('mousemove', onDrag);
@@ -372,6 +404,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 
 				function onDrag(e) {
 					if (!draggingNode) return;
+                    dragHappened = true;
 					e.preventDefault();
 					draggingNode.x = e.clientX / scale - dragOffsetX;
 					draggingNode.y = e.clientY / scale - dragOffsetY;
@@ -382,7 +415,9 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 
 				function onDragEnd() {
 					if (!draggingNode) return;
-					vscode.postMessage({ command: 'saveLayout', payload: { [draggingNode.id]: { x: draggingNode.x, y: draggingNode.y } } });
+                    if (dragHappened) {
+					    vscode.postMessage({ command: 'saveLayout', payload: { [draggingNode.id]: { x: draggingNode.x, y: draggingNode.y } } });
+                    }
 					draggingNode = null;
 					document.removeEventListener('mousemove', onDrag);
 					document.removeEventListener('mouseup', onDragEnd);
