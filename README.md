@@ -2,6 +2,8 @@
 
 This VSCode extension scans your Java project for Akka SDK components and generates an interactive, visual diagram of their relationships. It's designed to help you quickly understand the architecture of your Akka SDK services.
 
+![diagram](example-component-diagram.png)
+
 ## **Features**
 
 * **Automatic Component Detection**: Scans your source code to find Akka SDK components like Endpoints, Entities, Views, Consumers, Workflows, and more.

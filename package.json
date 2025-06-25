@@ -2,7 +2,7 @@
   "name": "akka-diagram-generator",
   "displayName": "Akka Diagram Generator",
   "description": "Scans Java source code to generate Akka component diagrams.",
-  "version": "v0.0.1",
+  "version": "v0.0.2",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -49,5 +49,6 @@
     "mocha": "^10.2.0",
     "typescript": "^5.3.3",
     "@vscode/test-electron": "^2.3.8"
-  }
+  },
+  "repository": "https://github.com/mckeeh3/akka-component-diagram-vscode-extension"
 }
