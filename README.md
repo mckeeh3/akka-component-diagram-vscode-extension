@@ -8,6 +8,7 @@ This VSCode extension scans your Java project for Akka SDK components and genera
 
 * **Automatic Component Detection**: Scans your source code to find Akka SDK components like Endpoints, Entities, Views, Consumers, Workflows, and more.
 * **Interactive Diagram**: Renders components as nodes and their interactions as labeled edges in a dedicated editor tab.
+* **Marquee Selection**: Hold `Shift` key while clicking and dragging on the diagram background to draw a selection box. Or, while holding the `Shift` key, click other nodes to select multiple nodes.
 * **Manual Layout with Persistence**: Manually arrange the diagram by dragging nodes. Your custom layout, pan, and zoom settings are saved and restored between sessions.
 * **Click-to-Navigate**: Simply click on any component node in the diagram to instantly open the corresponding source file and jump to the class definition.
 * **Scoped Scans**: Right-click on any folder in the VSCode File Explorer to generate a diagram for just that part of your project.
@@ -22,7 +23,7 @@ Currently, the extension is distributed via a .vsix file available on the projec
 3. In VSCode, open the **Extensions** view from the side bar.
 4. Click the "More Actions" (**...**) button at the top of the Extensions view.
 5. Select **Install from VSIX...** and choose the .vsix file you downloaded.
-6. Reload VSCode when prompted.
+6. Reload the extension if prompted.
 
 ## **How to Use**
 
@@ -35,14 +36,17 @@ The primary way to use the extension is through the File Explorer context menu.
 
 ### **Interacting with the Diagram**
 
+* **Rearrange Layout**: Left-click and drag any component node to a new position. The layout is saved automatically.
 * **Navigate to Code**: Left-click on any component node.
 * **Pan the View**:
   * Mouse: Click and drag on the diagram's background.
   * Mac Trackpad: Press down with one finger and drag.
+  * Multiple Nodes: After selecting multiple nodes, click and drag any node from the group to move them all together. Your layout is saved automatically.
 * **Zoom the View**:
   * Mouse: Use the mouse wheel.
   * Mac Trackpad: Use a two-finger drag gesture (up to zoom out, down to zoom in) or a pinch-to-zoom gesture.
-* **Rearrange Layout**: Left-click and drag any component node to a new position. The layout is saved automatically.
+  * Marquee Selection: Hold `Shift` while clicking and dragging on the diagram background to draw a selection box.
+* **Delete Selected Nodes**: Click anywhere on the diagram's background (without holding `Shift`) or press the `Escape` key.
 
 ## **License**
 

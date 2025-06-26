@@ -266,12 +266,14 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; cursor: grab; }
 				body.panning { cursor: grabbing; }
 				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; user-select: none; }
+        .node.selected { box-shadow: 0 0 0 3px #60A5FA; /* Blue glow for selected nodes */ }
 				.node-title { font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.3); margin-bottom: 4px; text-align: center; }
 				.node-type { font-size: 0.75rem; text-align: center; opacity: 0.8; }
 				#diagram-root { position: relative; width: 100%; height: 100vh; }
 				#viewport { position: absolute; transform-origin: 0 0; }
                 #tooltip { position: fixed; background-color: #1f2937; color: white; border: 1px solid #4b5563; border-radius: 4px; padding: 8px; font-size: 12px; pointer-events: none; z-index: 100; max-width: 300px; }
                 #tooltip ul { list-style-type: disc; margin-left: 16px; }
+                #marquee { position: absolute; border: 1px solid #60A5FA; background-color: rgba(96, 165, 250, 0.2); pointer-events: none; z-index: 99; }
 			</style>
 		</head>
 		<body class="bg-gray-700">
@@ -279,6 +281,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 <div id="viewport">
 				    <div id="node-container" style="position: relative; width: 100%; height: 100%;"></div>
                     <canvas id="diagram-canvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                    <div id="marquee" class="hidden"></div>
                 </div>
 			</div>
             <div id="tooltip" class="hidden"></div>
@@ -296,12 +299,16 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 const viewport = document.getElementById('viewport');
                 const diagramRoot = document.getElementById('diagram-root');
                 const tooltip = document.getElementById('tooltip');
+                const marquee = document.getElementById('marquee');
 				const ctx = canvas.getContext('2d');
 				
 				let draggingNode = null, dragOffsetX, dragOffsetY, dragHappened = false;
                 let scale = initialViewState.scale, panX = initialViewState.panX, panY = initialViewState.panY;
                 let isPanning = false, lastPanPosition = { x: 0, y: 0 };
+                let isMarqueeSelecting = false, marqueeStartX, marqueeStartY;
                 let edgeLabelHitboxes = [];
+                const selectedNodes = new Set();
+                let initialDragPositions = new Map();
 
 				const componentColors = { httpEndpoint: 'bg-purple-600', grpcEndpoint: 'bg-indigo-600', eventSourcedEntity: 'bg-green-600', keyValueEntity: 'bg-emerald-600', view: 'bg-blue-600', consumer: 'bg-yellow-600', workflow: 'bg-orange-600', timedAction: 'bg-rose-600', agent: 'bg-pink-600', topic: 'bg-slate-500', serviceStream: 'bg-slate-500', unknown: 'bg-sky-700' };
 
@@ -330,7 +337,6 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				}
 
 				function drawEdges() {
-                    // This function now correctly handles rendering in a transformed "world" space
                     const padding = 200;
                     let minX = 0, minY = 0, maxX = 0, maxY = 0;
                     
@@ -349,13 +355,11 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     const worldWidth = maxX - minX;
                     const worldHeight = maxY - minY;
                     
-                    // Position and size the canvas to cover the whole world
                     canvas.style.left = \`\${minX - padding}px\`;
                     canvas.style.top = \`\${minY - padding}px\`;
                     canvas.width = worldWidth + padding * 2;
                     canvas.height = worldHeight + padding * 2;
                     
-                    // Position nodes absolutely within the node container
                     nodes.forEach(n => {
                         n.element.style.left = \`\${n.x}px\`;
                         n.element.style.top = \`\${n.y}px\`;
@@ -363,7 +367,6 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 
 					ctx.clearRect(0, 0, canvas.width, canvas.height);
                     ctx.save();
-                    // Translate the drawing context to match the world's origin
                     ctx.translate(-minX + padding, -minY + padding);
 					ctx.strokeStyle = '#A0AEC0'; ctx.lineWidth = 2; ctx.fillStyle = '#E2E8F0';
 					ctx.font = '11px Inter'; ctx.textAlign = 'center';
@@ -399,42 +402,125 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 
                 function updateTransform() { viewport.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${scale})\`; }
                 function saveViewState() { vscode.postMessage({ command: 'saveViewState', payload: { panX, panY, scale } }); }
-                function onNodeClick(e) { if (dragHappened) { e.stopPropagation(); return; } vscode.postMessage({ command: 'navigateTo', payload: { componentId: e.currentTarget.id.replace('node-', '') }}); }
+                
+                function clearSelection() {
+                    if (selectedNodes.size > 0) {
+                        selectedNodes.forEach(sid => {
+                            const nodeEl = document.getElementById('node-' + sid);
+                            if (nodeEl) {
+                                nodeEl.classList.remove('selected');
+                            }
+                        });
+                        selectedNodes.clear();
+                    }
+                }
+
+                function onNodeClick(e) {
+                    // This function now primarily handles navigation and shift-click selections.
+                    // The 'dragHappened' flag prevents it from firing after a drag.
+                    if (dragHappened) {
+                        return; 
+                    }
+                    const nodeEl = e.currentTarget;
+                    const nodeId = nodeEl.id.replace('node-', '');
+
+                    if (e.shiftKey) {
+                        e.stopPropagation();
+                        if (selectedNodes.has(nodeId)) {
+                            selectedNodes.delete(nodeId);
+                            nodeEl.classList.remove('selected');
+                        } else {
+                            selectedNodes.add(nodeId);
+                            nodeEl.classList.add('selected');
+                        }
+                    } else {
+                        if (selectedNodes.size <= 1) {
+                             vscode.postMessage({ command: 'navigateTo', payload: { componentId: nodeId }});
+                        }
+                    }
+                }
 				
 				function onDragStart(e) {
-					if (e.button !== 0) return;
+                    if (e.button !== 0) return;
                     e.stopPropagation();
-					const nodeEl = e.target.closest('.node');
-					if (!nodeEl) return;
-					const id = nodeEl.id.replace('node-', '');
-					draggingNode = nodes.find(n => n.id === id);
-					if (draggingNode) {
+                    const nodeEl = e.target.closest('.node');
+                    if (!nodeEl) return;
+                    const id = nodeEl.id.replace('node-', '');
+                    draggingNode = nodes.find(n => n.id === id);
+
+                    if (draggingNode) {
                         dragHappened = false;
-						dragOffsetX = (e.clientX - panX) / scale - draggingNode.x;
-						dragOffsetY = (e.clientY - panY) / scale - draggingNode.y;
-						window.addEventListener('mousemove', onDrag);
-						window.addEventListener('mouseup', onDragEnd);
-					}
-				}
+
+                        if (!e.shiftKey) {
+                           if (!selectedNodes.has(id)) {
+                                clearSelection();
+                                selectedNodes.add(id);
+                                nodeEl.classList.add('selected');
+                           }
+                        }
+                        
+                        initialDragPositions.clear();
+                        selectedNodes.forEach(sid => {
+                            const node = nodes.find(n => n.id === sid);
+                            if (node) {
+                                initialDragPositions.set(sid, { x: node.x, y: node.y });
+                            }
+                        });
+                        
+                        const primaryNodeInitialPos = initialDragPositions.get(id);
+                        dragOffsetX = (e.clientX - panX) / scale - primaryNodeInitialPos.x;
+                        dragOffsetY = (e.clientY - panY) / scale - primaryNodeInitialPos.y;
+
+                        window.addEventListener('mousemove', onDrag);
+                        window.addEventListener('mouseup', onDragEnd);
+                    }
+                }
 
 				function onDrag(e) {
-					if (!draggingNode) return;
+                    if (!draggingNode) return;
                     dragHappened = true;
-					e.preventDefault();
-					draggingNode.x = (e.clientX - panX) / scale - dragOffsetX;
-					draggingNode.y = (e.clientY - panY) / scale - dragOffsetY;
-					requestAnimationFrame(drawEdges);
-				}
+                    e.preventDefault();
+
+                    const mouseX = (e.clientX - panX) / scale;
+                    const mouseY = (e.clientY - panY) / scale;
+
+                    const primaryNodeInitialPos = initialDragPositions.get(draggingNode.id);
+                    const dx = mouseX - (primaryNodeInitialPos.x + dragOffsetX);
+                    const dy = mouseY - (primaryNodeInitialPos.y + dragOffsetY);
+
+                    selectedNodes.forEach(sid => {
+                        const node = nodes.find(n => n.id === sid);
+                        const initialPos = initialDragPositions.get(sid);
+                        if (node && initialPos) {
+                            node.x = initialPos.x + dx;
+                            node.y = initialPos.y + dy;
+                        }
+                    });
+
+                    requestAnimationFrame(drawEdges);
+                }
 
 				function onDragEnd() {
-					if (!draggingNode) return;
+                    if (!draggingNode) return;
                     if (dragHappened) {
-					    vscode.postMessage({ command: 'saveLayout', payload: { [draggingNode.id]: { x: draggingNode.x, y: draggingNode.y } } });
+                        const layoutPayload = {};
+                        selectedNodes.forEach(sid => {
+                            const node = nodes.find(n => n.id === sid);
+                            if (node) {
+                                layoutPayload[sid] = { x: node.x, y: node.y };
+                            }
+                        });
+                        vscode.postMessage({ command: 'saveLayout', payload: layoutPayload });
                     }
-					draggingNode = null;
-					window.removeEventListener('mousemove', onDrag);
-					window.removeEventListener('mouseup', onDragEnd);
-				}
+                    
+                    draggingNode = null;
+                    initialDragPositions.clear();
+                    window.removeEventListener('mousemove', onDrag);
+                    window.removeEventListener('mouseup', onDragEnd);
+                    
+                    // Defer resetting dragHappened to allow the subsequent 'click' event to check it first.
+                    setTimeout(() => { dragHappened = false; }, 0);
+                }
 				
                 diagramRoot.addEventListener('wheel', e => {
                     e.preventDefault();
@@ -451,7 +537,22 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 });
 
                 diagramRoot.addEventListener('mousedown', e => {
-                    if (e.button === 0 && !e.target.closest('.node')) {
+                    if (e.target.closest('.node')) return;
+                    
+                    if (e.shiftKey) {
+                        isMarqueeSelecting = true;
+                        document.body.style.cursor = 'crosshair';
+                        marqueeStartX = (e.clientX - panX) / scale;
+                        marqueeStartY = (e.clientY - panY) / scale;
+                        marquee.style.left = \`\${marqueeStartX}px\`;
+                        marquee.style.top = \`\${marqueeStartY}px\`;
+                        marquee.style.width = '0px';
+                        marquee.style.height = '0px';
+                        marquee.classList.remove('hidden');
+                        
+                        clearSelection();
+
+                    } else if (e.button === 0) {
                         isPanning = true;
                         lastPanPosition = { x: e.clientX, y: e.clientY };
                         document.body.classList.add('panning');
@@ -464,7 +565,47 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                         panX += dx; panY += dy;
                         lastPanPosition = { x: e.clientX, y: e.clientY };
                         updateTransform();
+                    } else if (isMarqueeSelecting) {
+                        const currentX = (e.clientX - panX) / scale;
+                        const currentY = (e.clientY - panY) / scale;
+                        const left = Math.min(marqueeStartX, currentX);
+                        const top = Math.min(marqueeStartY, currentY);
+                        const width = Math.abs(currentX - marqueeStartX);
+                        const height = Math.abs(currentY - marqueeStartY);
+
+                        marquee.style.left = \`\${left}px\`;
+                        marquee.style.top = \`\${top}px\`;
+                        marquee.style.width = \`\${width}px\`;
+                        marquee.style.height = \`\${height}px\`;
+                        
+                        const marqueeRect = { left, top, right: left + width, bottom: top + height };
+                        
+                        nodes.forEach(node => {
+                            const nodeEl = node.element;
+                            const nodeRect = {
+                                left: node.x,
+                                top: node.y,
+                                right: node.x + nodeEl.offsetWidth,
+                                bottom: node.y + nodeEl.offsetHeight
+                            };
+                            
+                            const intersects = nodeRect.left < marqueeRect.right && nodeRect.right > marqueeRect.left &&
+                                               nodeRect.top < marqueeRect.bottom && nodeRect.bottom > marqueeRect.top;
+
+                            if (intersects) {
+                                if (!selectedNodes.has(node.id)) {
+                                    selectedNodes.add(node.id);
+                                    nodeEl.classList.add('selected');
+                                }
+                            } else {
+                                if (selectedNodes.has(node.id)) {
+                                    selectedNodes.delete(node.id);
+                                    nodeEl.classList.remove('selected');
+                                }
+                            }
+                        });
                     } else {
+                        // Tooltip logic
                         const worldX = (e.clientX - panX) / scale;
                         const worldY = (e.clientY - panY) / scale;
                         let hoveredEdge = null;
@@ -485,11 +626,41 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     }
                 });
 
+                diagramRoot.addEventListener('click', (e) => {
+                    // Deselect if user clicks background without holding shift and a drag didn't just happen
+                    if (!e.target.closest('.node') && !e.shiftKey && !dragHappened) {
+                        clearSelection();
+                    }
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        clearSelection();
+                    }
+                });
+
                 window.addEventListener('mouseup', e => {
                      if (isPanning) {
                         isPanning = false;
                         document.body.classList.remove('panning');
                         saveViewState();
+                    } else if (isMarqueeSelecting) {
+                        isMarqueeSelecting = false;
+                        document.body.style.cursor = 'grab';
+                        marquee.classList.add('hidden');
+                    }
+                });
+
+                window.addEventListener('mouseleave', () => {
+                    if (draggingNode) onDragEnd();
+                    if (isPanning) {
+                        isPanning = false;
+                        document.body.classList.remove('panning');
+                    }
+                    if (isMarqueeSelecting) {
+                        isMarqueeSelecting = false;
+                        document.body.style.cursor = 'grab';
+                        marquee.classList.add('hidden');
                     }
                 });
 
@@ -502,3 +673,4 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 }
 
 export function deactivate() {}
+
