@@ -268,16 +268,17 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				.node { border-radius: 8px; color: white; padding: 8px 12px; position: absolute; cursor: move; min-width: 180px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; user-select: none; }
 				.node-title { font-weight: 600; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.3); margin-bottom: 4px; text-align: center; }
 				.node-type { font-size: 0.75rem; text-align: center; opacity: 0.8; }
-				#viewport { transform-origin: 0 0; }
+				#diagram-root { position: relative; width: 100%; height: 100vh; }
+				#viewport { position: absolute; transform-origin: 0 0; }
                 #tooltip { position: fixed; background-color: #1f2937; color: white; border: 1px solid #4b5563; border-radius: 4px; padding: 8px; font-size: 12px; pointer-events: none; z-index: 100; max-width: 300px; }
                 #tooltip ul { list-style-type: disc; margin-left: 16px; }
 			</style>
 		</head>
 		<body class="bg-gray-700">
-			<div id="diagram-root" class="w-full h-screen relative">
+			<div id="diagram-root">
                 <div id="viewport">
-				    <canvas id="diagram-canvas" class="absolute inset-0"></canvas>
-				    <div id="node-container" class="absolute inset-0"></div>
+				    <div id="node-container" style="position: relative; width: 100%; height: 100%;"></div>
+                    <canvas id="diagram-canvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
                 </div>
 			</div>
             <div id="tooltip" class="hidden"></div>
@@ -312,7 +313,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 						createNodeElement(node);
 					});
                     updateTransform();
-					drawEdges();
+					requestAnimationFrame(drawEdges);
 				}
 
 				function createNodeElement(node) {
@@ -321,8 +322,6 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     const typeKey = node.type.charAt(0).toLowerCase() + node.type.slice(1);
 					const colorClass = componentColors[typeKey] || componentColors['unknown'];
 					el.className = 'node ' + colorClass;
-					el.style.left = node.x + 'px';
-					el.style.top = node.y + 'px';
 					el.innerHTML = \`<div class="node-title">\${node.id}</div><div class="node-type">\${node.name} (\${node.type})</div>\`;
 					el.addEventListener('mousedown', onDragStart);
                     el.addEventListener('click', onNodeClick);
@@ -331,13 +330,41 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				}
 
 				function drawEdges() {
+                    // This function now correctly handles rendering in a transformed "world" space
                     const padding = 200;
-                    let maxX = diagramRoot.clientWidth / scale; let maxY = diagramRoot.clientHeight / scale;
-                    nodes.forEach(n => { if (n.x + 200 > maxX) maxX = n.x + 200; if (n.y + 100 > maxY) maxY = n.y + 100; });
-                    canvas.width = maxX + padding; canvas.height = maxY + padding;
-                    viewport.style.width = canvas.width + 'px'; viewport.style.height = canvas.height + 'px';
+                    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+                    
+                    if (nodes.length > 0) {
+                        minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+                        nodes.forEach(n => {
+                            const nodeWidth = n.element ? n.element.offsetWidth : 180;
+                            const nodeHeight = n.element ? n.element.offsetHeight : 60;
+                            if (n.x < minX) minX = n.x;
+                            if (n.y < minY) minY = n.y;
+                            if (n.x + nodeWidth > maxX) maxX = n.x + nodeWidth;
+                            if (n.y + nodeHeight > maxY) maxY = n.y + nodeHeight;
+                        });
+                    }
+                    
+                    const worldWidth = maxX - minX;
+                    const worldHeight = maxY - minY;
+                    
+                    // Position and size the canvas to cover the whole world
+                    canvas.style.left = \`\${minX - padding}px\`;
+                    canvas.style.top = \`\${minY - padding}px\`;
+                    canvas.width = worldWidth + padding * 2;
+                    canvas.height = worldHeight + padding * 2;
+                    
+                    // Position nodes absolutely within the node container
+                    nodes.forEach(n => {
+                        n.element.style.left = \`\${n.x}px\`;
+                        n.element.style.top = \`\${n.y}px\`;
+                    });
 
 					ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.save();
+                    // Translate the drawing context to match the world's origin
+                    ctx.translate(-minX + padding, -minY + padding);
 					ctx.strokeStyle = '#A0AEC0'; ctx.lineWidth = 2; ctx.fillStyle = '#E2E8F0';
 					ctx.font = '11px Inter'; ctx.textAlign = 'center';
                     edgeLabelHitboxes = [];
@@ -346,9 +373,10 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 						const sourceNode = nodes.find(n => n.id === edge.source);
 						const targetNode = nodes.find(n => n.id === edge.target);
 						if (sourceNode && targetNode && sourceNode.element && targetNode.element) {
-							const sElem = sourceNode.element; const tElem = targetNode.element;
-							const startX = sElem.offsetLeft + sElem.offsetWidth; const startY = sElem.offsetTop + sElem.offsetHeight / 2;
-							const endX = tElem.offsetLeft; const endY = tElem.offsetTop + tElem.offsetHeight / 2;
+							const startX = sourceNode.x + sourceNode.element.offsetWidth;
+							const startY = sourceNode.y + sourceNode.element.offsetHeight / 2;
+							const endX = targetNode.x;
+							const endY = targetNode.y + targetNode.element.offsetHeight / 2;
 							const cp1x = startX + 60; const cp1y = startY; const cp2x = endX - 60; const cp2y = endY;
 							
 							ctx.beginPath(); ctx.moveTo(startX, startY); ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, endX, endY); ctx.stroke();
@@ -366,6 +394,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 							}
 						}
 					});
+                    ctx.restore();
 				}
 
                 function updateTransform() { viewport.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${scale})\`; }
@@ -374,17 +403,17 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 				
 				function onDragStart(e) {
 					if (e.button !== 0) return;
-                    e.stopPropagation(); // Prevent pan from starting
+                    e.stopPropagation();
 					const nodeEl = e.target.closest('.node');
 					if (!nodeEl) return;
 					const id = nodeEl.id.replace('node-', '');
 					draggingNode = nodes.find(n => n.id === id);
 					if (draggingNode) {
                         dragHappened = false;
-						dragOffsetX = e.clientX / scale - draggingNode.x;
-						dragOffsetY = e.clientY / scale - draggingNode.y;
-						document.addEventListener('mousemove', onDrag);
-						document.addEventListener('mouseup', onDragEnd);
+						dragOffsetX = (e.clientX - panX) / scale - draggingNode.x;
+						dragOffsetY = (e.clientY - panY) / scale - draggingNode.y;
+						window.addEventListener('mousemove', onDrag);
+						window.addEventListener('mouseup', onDragEnd);
 					}
 				}
 
@@ -392,10 +421,8 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 					if (!draggingNode) return;
                     dragHappened = true;
 					e.preventDefault();
-					draggingNode.x = e.clientX / scale - dragOffsetX;
-					draggingNode.y = e.clientY / scale - dragOffsetY;
-					draggingNode.element.style.left = draggingNode.x + 'px';
-					draggingNode.element.style.top = draggingNode.y + 'px';
+					draggingNode.x = (e.clientX - panX) / scale - dragOffsetX;
+					draggingNode.y = (e.clientY - panY) / scale - dragOffsetY;
 					requestAnimationFrame(drawEdges);
 				}
 
@@ -405,8 +432,8 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
 					    vscode.postMessage({ command: 'saveLayout', payload: { [draggingNode.id]: { x: draggingNode.x, y: draggingNode.y } } });
                     }
 					draggingNode = null;
-					document.removeEventListener('mousemove', onDrag);
-					document.removeEventListener('mouseup', onDragEnd);
+					window.removeEventListener('mousemove', onDrag);
+					window.removeEventListener('mouseup', onDragEnd);
 				}
 				
                 diagramRoot.addEventListener('wheel', e => {
@@ -419,11 +446,11 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     panX = mouseX - (mouseX - panX) * (scale / oldScale);
                     panY = mouseY - (mouseY - panY) * (scale / oldScale);
                     updateTransform();
+                    requestAnimationFrame(drawEdges);
                     saveViewState();
                 });
 
                 diagramRoot.addEventListener('mousedown', e => {
-                    // Start panning if the click is on the background (not a node)
                     if (e.button === 0 && !e.target.closest('.node')) {
                         isPanning = true;
                         lastPanPosition = { x: e.clientX, y: e.clientY };
@@ -438,13 +465,12 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                         lastPanPosition = { x: e.clientX, y: e.clientY };
                         updateTransform();
                     } else {
-                        // Tooltip logic
-                        const rect = viewport.getBoundingClientRect();
-                        const mouseX = (e.clientX - rect.left); const mouseY = (e.clientY - rect.top);
+                        const worldX = (e.clientX - panX) / scale;
+                        const worldY = (e.clientY - panY) / scale;
                         let hoveredEdge = null;
                         for(const hitbox of edgeLabelHitboxes) {
-                            if (mouseX >= hitbox.x * scale && mouseX <= (hitbox.x + hitbox.width) * scale &&
-                                mouseY >= hitbox.y * scale && mouseY <= (hitbox.y + hitbox.height) * scale) {
+                            if (worldX >= hitbox.x && worldX <= hitbox.x + hitbox.width &&
+                                worldY >= hitbox.y && worldY <= hitbox.y + hitbox.height) {
                                 hoveredEdge = hitbox.edge; break;
                             }
                         }
