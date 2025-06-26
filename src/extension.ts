@@ -416,11 +416,7 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 }
 
                 function onNodeClick(e) {
-                    // This function now primarily handles navigation and shift-click selections.
-                    // The 'dragHappened' flag prevents it from firing after a drag.
-                    if (dragHappened) {
-                        return; 
-                    }
+                    if (dragHappened) { return; }
                     const nodeEl = e.currentTarget;
                     const nodeId = nodeEl.id.replace('node-', '');
 
@@ -518,22 +514,32 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                     window.removeEventListener('mousemove', onDrag);
                     window.removeEventListener('mouseup', onDragEnd);
                     
-                    // Defer resetting dragHappened to allow the subsequent 'click' event to check it first.
                     setTimeout(() => { dragHappened = false; }, 0);
+                }
+
+                function zoom(direction, centerX, centerY) {
+                    const zoomIntensity = 0.1;
+                    const oldScale = scale;
+                    scale = Math.max(0.1, Math.min(4, scale + direction * zoomIntensity * scale));
+                    panX = centerX - (centerX - panX) * (scale / oldScale);
+                    panY = centerY - (centerY - panY) * (scale / oldScale);
+                    updateTransform();
+                    saveViewState();
+                }
+
+                function resetZoom() {
+                    scale = 1;
+                    panX = 0;
+                    panY = 0;
+                    updateTransform();
+                    saveViewState();
                 }
 				
                 diagramRoot.addEventListener('wheel', e => {
                     e.preventDefault();
-                    const zoomIntensity = 0.1; const direction = e.deltaY < 0 ? 1 : -1;
-                    const oldScale = scale;
-                    scale = Math.max(0.1, Math.min(4, scale + direction * zoomIntensity * scale));
+                    const direction = e.deltaY < 0 ? 1 : -1;
                     const rect = diagramRoot.getBoundingClientRect();
-                    const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
-                    panX = mouseX - (mouseX - panX) * (scale / oldScale);
-                    panY = mouseY - (mouseY - panY) * (scale / oldScale);
-                    updateTransform();
-                    requestAnimationFrame(drawEdges);
-                    saveViewState();
+                    zoom(direction, e.clientX - rect.left, e.clientY - rect.top);
                 });
 
                 diagramRoot.addEventListener('mousedown', e => {
@@ -627,7 +633,6 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 });
 
                 diagramRoot.addEventListener('click', (e) => {
-                    // Deselect if user clicks background without holding shift and a drag didn't just happen
                     if (!e.target.closest('.node') && !e.shiftKey && !dragHappened) {
                         clearSelection();
                     }
@@ -636,6 +641,12 @@ function getWebviewContent(data: SerializableDiagramData, viewState: ViewState):
                 window.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         clearSelection();
+                    } else if (e.key === '+' || e.key === '=') {
+                        zoom(1, diagramRoot.clientWidth / 2, diagramRoot.clientHeight / 2);
+                    } else if (e.key === '-') {
+                        zoom(-1, diagramRoot.clientWidth / 2, diagramRoot.clientHeight / 2);
+                    } else if (e.key === '0') {
+                        resetZoom();
                     }
                 });
 

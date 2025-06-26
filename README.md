@@ -43,7 +43,7 @@ The primary way to use the extension is through the File Explorer context menu.
   * Mac Trackpad: Press down with one finger and drag.
   * Multiple Nodes: After selecting multiple nodes, click and drag any node from the group to move them all together. Your layout is saved automatically.
 * **Zoom the View**:
-  * Mouse: Use the mouse wheel.
+  * Mouse: Use the mouse wheel, or use the `+` and `-` keys, or use the `0` key to reset the zoom.
   * Mac Trackpad: Use a two-finger drag gesture (up to zoom out, down to zoom in) or a pinch-to-zoom gesture.
   * Marquee Selection: Hold `Shift` while clicking and dragging on the diagram background to draw a selection box.
 * **Delete Selected Nodes**: Click anywhere on the diagram's background (without holding `Shift`) or press the `Escape` key.
