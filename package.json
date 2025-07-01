@@ -18,6 +18,10 @@
       {
         "command": "akka-diagram-generator.scanProject",
         "title": "Akka: Generate Component Diagram"
+      },
+      {
+        "command": "akka-diagram-generator.clearLayout",
+        "title": "Akka: Clear Saved Diagram Layout"
       }
     ],
     "menus": {

@@ -81,7 +81,30 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  context.subscriptions.push(scanProjectDisposable);
+  let clearLayoutDisposable = vscode.commands.registerCommand('akka-diagram-generator.clearLayout', async () => {
+    const layout = context.workspaceState.get('akkaDiagramLayout', {});
+    const viewState = context.workspaceState.get('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+
+    if (Object.keys(layout).length === 0 && viewState.panX === 0 && viewState.panY === 0 && viewState.scale === 1) {
+      vscode.window.showInformationMessage('No saved diagram layout to clear.');
+      return;
+    }
+
+    const result = await vscode.window.showWarningMessage(
+      'Are you sure you want to clear the saved diagram layout? This will reset all custom node positions and view settings.',
+      { modal: true },
+      'Clear Layout',
+      'Cancel'
+    );
+
+    if (result === 'Clear Layout') {
+      context.workspaceState.update('akkaDiagramLayout', {});
+      context.workspaceState.update('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+      vscode.window.showInformationMessage('Diagram layout cleared successfully. The next time you generate a diagram, it will use default positioning.');
+    }
+  });
+
+  context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable);
 }
 
 // --- Parsing Functions ---

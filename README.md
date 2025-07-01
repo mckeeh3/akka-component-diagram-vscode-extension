@@ -34,6 +34,11 @@ The primary way to use the extension is through the File Explorer context menu.
 3. Select **Akka: Generate Component Diagram** from the context menu.
 4. A new editor tab will open, displaying the interactive component diagram.
 
+### **Available Commands**
+
+* **Akka: Generate Component Diagram**: Generate a diagram for the selected folder or the entire workspace
+* **Akka: Clear Saved Diagram Layout**: Clear all saved node positions and view settings (accessible via `Ctrl+Shift+P` command palette)
+
 ### **Interacting with the Diagram**
 
 * **Rearrange Layout**: Left-click and drag any component node to a new position. The layout is saved automatically.
