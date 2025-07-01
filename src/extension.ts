@@ -20,8 +20,8 @@ interface AkkaEdge {
   details: string[]; // To hold detailed interaction info, e.g., method names
 }
 
-// Data passed from the extension to the webview
-// SerializableDiagramData and ViewState are now imported from webviewManager
+// Global variable to track the existing diagram panel
+let currentDiagramPanel: vscode.WebviewPanel | undefined;
 
 // --- Extension Activation ---
 
@@ -219,10 +219,42 @@ function aggregateEdges(edges: AkkaEdge[]): AkkaEdge[] {
 // --- Webview Panel Creation ---
 
 function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+  // Check if we already have an active diagram panel
+  if (currentDiagramPanel) {
+    // Update the existing panel with new data
+    const serializableData: SerializableDiagramData = {
+      nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
+      edges: data.edges,
+    };
+
+    // Send the new data to the existing webview
+    currentDiagramPanel.webview.postMessage({
+      command: 'updateDiagram',
+      payload: { data: serializableData, viewState },
+    });
+
+    // Reveal the existing panel
+    currentDiagramPanel.reveal();
+    return;
+  }
+
+  // Create a new panel if none exists
   const panel = vscode.window.createWebviewPanel('akkaDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, {
     enableScripts: true,
     retainContextWhenHidden: true,
   });
+
+  // Store the panel reference
+  currentDiagramPanel = panel;
+
+  // Handle panel disposal
+  panel.onDidDispose(
+    () => {
+      currentDiagramPanel = undefined;
+    },
+    null,
+    context.subscriptions
+  );
 
   panel.webview.onDidReceiveMessage(
     async (message) => {

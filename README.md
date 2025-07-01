@@ -34,6 +34,8 @@ The primary way to use the extension is through the File Explorer context menu.
 3. Select **Akka: Generate Component Diagram** from the context menu.
 4. A new editor tab will open, displaying the interactive component diagram.
 
+**Note**: The extension reuses the same diagram tab for subsequent scans, so you won't get multiple diagram tabs. This preserves your layout and view settings when scanning different folders.
+
 ### **Available Commands**
 
 * **Akka: Generate Component Diagram**: Generate a diagram for the selected folder or the entire workspace

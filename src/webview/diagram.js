@@ -468,3 +468,30 @@ function setupEventListeners() {
 
 // Export the initialization function
 window.initializeDiagram = initializeDiagram;
+
+// Listen for messages from the extension
+window.addEventListener('message', (event) => {
+  const message = event.data;
+
+  switch (message.command) {
+    case 'updateDiagram':
+      // Update the diagram with new data
+      const { data: newData, viewState: newViewState } = message.payload;
+      diagramData = newData;
+      initialViewState = newViewState;
+      nodes = diagramData.nodes;
+      edges = diagramData.edges;
+
+      // Reset view state to new values
+      scale = initialViewState.scale;
+      panX = initialViewState.panX;
+      panY = initialViewState.panY;
+
+      // Clear any existing selections
+      clearSelection();
+
+      // Re-render the diagram
+      render();
+      break;
+  }
+});
