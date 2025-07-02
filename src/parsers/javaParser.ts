@@ -271,6 +271,7 @@ export class JavaParser {
       componentId: string;
     }> = [];
     const akkaSuperclasses = ['Agent', 'EventSourcedEntity', 'KeyValueEntity', 'View', 'Consumer', 'Workflow', 'TimedAction'];
+    const endpointAnnotations = ['HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
 
     function recurse(n: any) {
       if (n && n.name === 'classDeclaration') {
@@ -303,6 +304,8 @@ export class JavaParser {
         // Check for annotations on the class
         let hasComponentId = false;
         let componentIdValue = '';
+        let endpointType = '';
+        let endpointValue = '';
 
         if (n.children && n.children.classModifier) {
           for (const modifier of n.children.classModifier) {
@@ -325,13 +328,35 @@ export class JavaParser {
                     const stringValue = JavaParser.extractStringValueFromElementValue(ev);
                     componentIdValue = stringValue || '';
                   }
+                } else if (endpointAnnotations.includes(annotationName)) {
+                  endpointType = annotationName;
+                  // Extract endpoint value - handle different argument formats
+                  if (annotation.children && annotation.children.elementValue) {
+                    // Single argument (e.g., @HttpEndpoint("/path"))
+                    const ev = annotation.children.elementValue[0];
+                    const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                    endpointValue = stringValue || '';
+                  } else if (annotation.children && annotation.children.elementValuePairList) {
+                    // Named arguments (e.g., @MCPEndpoint(name="service", port=8080))
+                    const pairs = annotation.children.elementValuePairList;
+                    const namePair = pairs.find((pair: any) => pair.children && pair.children.Identifier && pair.children.Identifier[0] && pair.children.Identifier[0].image === 'name');
+                    if (namePair && namePair.children && namePair.children.elementValue) {
+                      const ev = namePair.children.elementValue[0];
+                      const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                      endpointValue = stringValue || '';
+                    }
+                  }
+                  // If no arguments found, use the annotation name as the ID
+                  if (!endpointValue) {
+                    endpointValue = annotationName.toLowerCase();
+                  }
                 }
               }
             }
           }
         }
 
-        // Check if it's an Akka component
+        // Check if it's an Akka component based on superclass + ComponentId
         if (hasComponentId && akkaSuperclasses.includes(superclassName)) {
           const componentType = superclassName;
           components.push({
@@ -339,6 +364,16 @@ export class JavaParser {
             className,
             componentType,
             componentId: componentIdValue,
+          });
+        }
+
+        // Check if it's an endpoint component (annotation-based)
+        if (endpointType && endpointValue) {
+          components.push({
+            filename,
+            className,
+            componentType: endpointType,
+            componentId: endpointValue,
           });
         }
       }

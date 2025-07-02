@@ -8,6 +8,7 @@ import java.util.List;
 
 @ComponentId("my-component")
 @HttpEndpoint("/api/v1")
+@GrpcEndpoint
 public class MyComponent extends EventSourcedEntity {
     
     @GrpcEndpoint("service1")
@@ -15,18 +16,20 @@ public class MyComponent extends EventSourcedEntity {
         // method body
     }
     
-    @MCPEndpoint("service2")
+    @MCPEndpoint(name="service2", port=8080)
     public void method2() {
         // method body
     }
 }
 
 @ComponentId("my-agent")
+@HttpEndpoint
 public class MyAgent extends Agent {
     // agent implementation
 }
 
 @ComponentId("my-view")
+@MCPEndpoint(name="view-service")
 public class MyView extends View {
     // view implementation
 }
@@ -177,6 +180,7 @@ function extractAnnotationsFromCST(node) {
 function extractAkkaComponentsFromCST(node, filename) {
   const components = [];
   const akkaSuperclasses = ['Agent', 'EventSourcedEntity', 'KeyValueEntity', 'View', 'Consumer', 'Workflow', 'TimedAction'];
+  const endpointAnnotations = ['HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
 
   function printTypeIdentifierInfo(typeIdentifier) {
     if (!typeIdentifier) return;
@@ -242,6 +246,8 @@ function extractAkkaComponentsFromCST(node, filename) {
       // Check for annotations on the class
       let hasComponentId = false;
       let componentIdValue = '';
+      let endpointType = '';
+      let endpointValue = '';
       if (n.children && n.children.classModifier) {
         for (const modifier of n.children.classModifier) {
           if (modifier.children && modifier.children.annotation) {
@@ -262,11 +268,34 @@ function extractAkkaComponentsFromCST(node, filename) {
                   const stringValue = extractStringValueFromElementValue(ev);
                   componentIdValue = stringValue || '';
                 }
+              } else if (endpointAnnotations.includes(annotationName)) {
+                endpointType = annotationName;
+                // Extract endpoint value - handle different argument formats
+                if (annotation.children && annotation.children.elementValue) {
+                  // Single argument (e.g., @HttpEndpoint("/path"))
+                  const ev = annotation.children.elementValue[0];
+                  const stringValue = extractStringValueFromElementValue(ev);
+                  endpointValue = stringValue || '';
+                } else if (annotation.children && annotation.children.elementValuePairList) {
+                  // Named arguments (e.g., @MCPEndpoint(name="service", port=8080))
+                  const pairs = annotation.children.elementValuePairList;
+                  const namePair = pairs.find((pair) => pair.children && pair.children.Identifier && pair.children.Identifier[0] && pair.children.Identifier[0].image === 'name');
+                  if (namePair && namePair.children && namePair.children.elementValue) {
+                    const ev = namePair.children.elementValue[0];
+                    const stringValue = extractStringValueFromElementValue(ev);
+                    endpointValue = stringValue || '';
+                  }
+                }
+                // If no arguments found, use the annotation name as the ID
+                if (!endpointValue) {
+                  endpointValue = annotationName.toLowerCase();
+                }
               }
             }
           }
         }
       }
+      // Check if it's an Akka component based on superclass + ComponentId
       if (hasComponentId && akkaSuperclasses.includes(superclassName)) {
         const componentType = superclassName;
         components.push({
@@ -274,6 +303,15 @@ function extractAkkaComponentsFromCST(node, filename) {
           className,
           componentType,
           componentId: componentIdValue,
+        });
+      }
+      // Check if it's an endpoint component (annotation-based)
+      if (endpointType && endpointValue) {
+        components.push({
+          filename,
+          className,
+          componentType: endpointType,
+          componentId: endpointValue,
         });
       }
     }
