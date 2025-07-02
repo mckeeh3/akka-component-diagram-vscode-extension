@@ -1,17 +1,28 @@
 import * as vscode from 'vscode';
 import { AkkaComponent, AkkaEdge } from '../models/types';
+import * as path from 'path';
 
-export async function parseNodes(files: vscode.Uri[]): Promise<Map<string, AkkaComponent>> {
+export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLine: (msg: string) => void }): Promise<Map<string, AkkaComponent>> {
+  const log = (msg: string) => {
+    console.log(msg);
+    if (outputChannel) outputChannel.appendLine(msg);
+  };
+  log(`[AkkaParser] Starting to parse ${files.length} files for components`);
   const parsedNodes = new Map<string, AkkaComponent>();
+
   for (const file of files) {
+    log(`[AkkaParser] Processing file: ${file.fsPath}`);
     const document = await vscode.workspace.openTextDocument(file);
     const text = document.getText();
-    const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:("([^"]+)"))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
+    const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
 
     let match;
+    let fileComponentCount = 0;
     while ((match = componentRegex.exec(text)) !== null) {
       const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
       let componentType: string = annotationType === 'ComponentId' ? extendedOrImplementedClass || 'Unknown' : annotationType;
+
+      log(`[AkkaParser] Found component: ${className} (${annotationType}) with type: ${componentType}`);
 
       if (!parsedNodes.has(className)) {
         parsedNodes.set(className, {
@@ -20,13 +31,22 @@ export async function parseNodes(files: vscode.Uri[]): Promise<Map<string, AkkaC
           type: componentType,
           uri: file,
         });
+        fileComponentCount++;
       }
     }
+    log(`[AkkaParser] File ${path.basename(file.fsPath)}: found ${fileComponentCount} components`);
   }
+
+  log(`[AkkaParser] Total components found: ${parsedNodes.size}`);
   return parsedNodes;
 }
 
-export async function parseEdges(nodes: Map<string, AkkaComponent>): Promise<AkkaEdge[]> {
+export async function parseEdges(nodes: Map<string, AkkaComponent>, outputChannel?: { appendLine: (msg: string) => void }): Promise<AkkaEdge[]> {
+  const log = (msg: string) => {
+    console.log(msg);
+    if (outputChannel) outputChannel.appendLine(msg);
+  };
+  log(`[AkkaParser] Starting to parse edges for ${nodes.size} nodes`);
   const foundEdges: AkkaEdge[] = [];
   for (const sourceNode of nodes.values()) {
     if (sourceNode.uri.scheme === 'untitled') continue;

@@ -1,24 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { getWebviewContent, SerializableDiagramData, ViewState } from './webview/webviewManager';
+import { getWebviewContent } from './webview/webviewManager';
+import { JavaParser } from './parsers/javaParser';
+import { parseNodes, parseEdges, aggregateEdges } from './parsers/akkaParser';
+import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 
 // --- Type Definitions ---
-
-interface AkkaComponent {
-  id: string; // The class name, used as a unique ID
-  name: string; // The component name from the annotation (e.g., "customer")
-  type: string; // e.g., "EventSourcedEntity", "HttpEndpoint"
-  uri: vscode.Uri; // The URI of the file where the component is defined
-  x?: number; // Optional X coordinate for layout
-  y?: number; // Optional Y coordinate for layout
-}
-
-interface AkkaEdge {
-  source: string;
-  target: string;
-  label: string;
-  details: string[]; // To hold detailed interaction info, e.g., method names
-}
 
 // Global variable to track the existing diagram panel
 let currentDiagramPanel: vscode.WebviewPanel | undefined;
@@ -27,6 +14,9 @@ let currentDiagramPanel: vscode.WebviewPanel | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
+
+  // Create output channel for debugging
+  const outputChannel = vscode.window.createOutputChannel('Akka Diagram Generator');
 
   let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async (uri: vscode.Uri) => {
     let scanFolder: vscode.WorkspaceFolder | undefined;
@@ -56,11 +46,98 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
+    outputChannel.appendLine(`[Extension] Found ${javaFiles.length} Java files to scan`);
 
-    const parsedNodes = await parseNodes(javaFiles);
-    const foundEdges = await parseEdges(parsedNodes);
+    // --- Java Parser Step ---
+    console.log(`[Extension] Starting Java parser for ${javaFiles.length} files`);
+    outputChannel.appendLine(`[Extension] Starting Java parser for ${javaFiles.length} files`);
+
+    const parseResults = await JavaParser.parseFiles(javaFiles);
+
+    // Count successes and failures
+    const successfulParses = parseResults.filter((r) => r.success);
+    const failedParses = parseResults.filter((r) => !r.success);
+
+    console.log(`[Extension] Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
+    outputChannel.appendLine(`[Extension] Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
+
+    // Show user feedback
+    if (failedParses.length > 0) {
+      failedParses.forEach((result) => {
+        vscode.window.showWarningMessage(`Failed to parse Java file: ${path.basename(result.filename)}`);
+        outputChannel.appendLine(`[Extension] Parse failed: ${result.filename} - ${result.error}`);
+      });
+    }
+
+    vscode.window.showInformationMessage(`Java parser: ${successfulParses.length} files parsed successfully, ${failedParses.length} failures`);
+
+    // Debug: Log AST structure for first successful parse
+    if (successfulParses.length > 0) {
+      console.log(`[Extension] Debugging AST structure for: ${successfulParses[0].filename}`);
+      outputChannel.appendLine(`[Extension] Debugging AST structure for: ${successfulParses[0].filename}`);
+      JavaParser.debugAST(successfulParses[0].ast!);
+    }
+
+    // --- Extract Annotations from CST ---
+    console.log(`[Extension] Starting annotation extraction from CST...`);
+    outputChannel.appendLine(`[Extension] Starting annotation extraction from CST...`);
+
+    const allAnnotations: Array<{
+      filename: string;
+      annotations: Array<{ name: string; arguments?: string[]; location?: any }>;
+    }> = [];
+
+    for (const result of successfulParses) {
+      if (result.ast) {
+        const annotations = JavaParser.extractAnnotationsFromCST(result.ast);
+        allAnnotations.push({
+          filename: result.filename,
+          annotations,
+        });
+
+        console.log(`[Extension] File ${path.basename(result.filename)}: Found ${annotations.length} annotations`);
+        outputChannel.appendLine(`[Extension] File ${path.basename(result.filename)}: Found ${annotations.length} annotations`);
+
+        // Log each annotation for debugging
+        annotations.forEach((annotation, index) => {
+          const locationInfo = annotation.location ? `line ${annotation.location.startLine}, col ${annotation.location.startColumn}` : 'unknown location';
+
+          console.log(`[Extension]   Annotation ${index + 1}: ${annotation.name} at ${locationInfo}`);
+          outputChannel.appendLine(`[Extension]   Annotation ${index + 1}: ${annotation.name} at ${locationInfo}`);
+
+          if (annotation.arguments && annotation.arguments.length > 0) {
+            console.log(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+            outputChannel.appendLine(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+          }
+        });
+      }
+    }
+
+    // Look for Akka-specific annotations
+    const akkaAnnotations = ['ComponentId', 'HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
+    const foundAkkaAnnotations = allAnnotations.flatMap((fileResult) => fileResult.annotations.filter((ann) => akkaAnnotations.includes(ann.name)));
+
+    console.log(`[Extension] Found ${foundAkkaAnnotations.length} Akka-specific annotations across all files`);
+    outputChannel.appendLine(`[Extension] Found ${foundAkkaAnnotations.length} Akka-specific annotations across all files`);
+
+    if (foundAkkaAnnotations.length > 0) {
+      foundAkkaAnnotations.forEach((annotation, index) => {
+        console.log(`[Extension]   Akka annotation ${index + 1}: ${annotation.name}`);
+        outputChannel.appendLine(`[Extension]   Akka annotation ${index + 1}: ${annotation.name}`);
+        if (annotation.arguments && annotation.arguments.length > 0) {
+          console.log(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+          outputChannel.appendLine(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+        }
+      });
+    }
+
+    outputChannel.appendLine(`[Extension] Starting regex-based component detection...`);
+    const parsedNodes = await parseNodes(javaFiles, outputChannel);
+    const foundEdges = await parseEdges(parsedNodes, outputChannel);
 
     const aggregatedEdges = aggregateEdges(foundEdges);
+
+    outputChannel.appendLine(`[Extension] Regex parsing complete. Found ${parsedNodes.size} components and ${aggregatedEdges.length} edges`);
 
     // --- Load saved layouts from workspace state ---
     const savedNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaDiagramLayout', {});
@@ -75,9 +152,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     // --- Create the Webview Panel ---
     if (diagramData.nodes.length > 0) {
+      outputChannel.appendLine(`[Extension] Creating diagram with ${diagramData.nodes.length} nodes and ${diagramData.edges.length} edges`);
       createDiagramPanel(context, diagramData, savedViewState);
     } else {
       vscode.window.showWarningMessage('No Akka components found in this project.');
+      outputChannel.appendLine(`[Extension] No Akka components found in the project`);
     }
   });
 
@@ -105,115 +184,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable);
-}
-
-// --- Parsing Functions ---
-
-async function parseNodes(files: vscode.Uri[]): Promise<Map<string, AkkaComponent>> {
-  const parsedNodes = new Map<string, AkkaComponent>();
-  for (const file of files) {
-    const document = await vscode.workspace.openTextDocument(file);
-    const text = document.getText();
-    const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
-
-    let match;
-    while ((match = componentRegex.exec(text)) !== null) {
-      const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
-      let componentType: string = annotationType === 'ComponentId' ? extendedOrImplementedClass || 'Unknown' : annotationType;
-
-      if (!parsedNodes.has(className)) {
-        parsedNodes.set(className, {
-          id: className,
-          name: componentId || className,
-          type: componentType,
-          uri: file,
-        });
-      }
-    }
-  }
-  return parsedNodes;
-}
-
-async function parseEdges(nodes: Map<string, AkkaComponent>): Promise<AkkaEdge[]> {
-  const foundEdges: AkkaEdge[] = [];
-  for (const sourceNode of nodes.values()) {
-    if (sourceNode.uri.scheme === 'untitled') continue;
-    const document = await vscode.workspace.openTextDocument(sourceNode.uri);
-    const text = document.getText();
-
-    const methodCallRegex = /\.method\s*\(([\w:]+)\)/g;
-    const clientCallRegex = /componentClient\.for(?:EventSourcedEntity|KeyValueEntity|View|Workflow|TimedAction)\(.*\)$/s;
-
-    let match;
-    while ((match = methodCallRegex.exec(text)) !== null) {
-      const methodRef = match[1];
-      const cleanedPrecedingText = text.substring(0, match.index).replace(/\s*\n\s*/g, '');
-      if (clientCallRegex.test(cleanedPrecedingText)) {
-        const [targetClass, methodName] = methodRef.split('::');
-        if (nodes.has(targetClass)) {
-          foundEdges.push({ source: sourceNode.id, target: targetClass, label: methodName, details: [] });
-        }
-      }
-    }
-
-    const consumeRegex = /@Consume\.From(EventSourcedEntity|KeyValueEntity|Workflow|Topic|ServiceStream)\((?:value\s*=\s*)?(?:(\w+)\.class|(?:"([^"]+)"))\)/g;
-    const produceRegex = /@Produce\.To(Topic|ServiceStream)\("([^"]+)"\)/g;
-
-    while ((match = consumeRegex.exec(text)) !== null) {
-      const [_, fromType, fromClass, fromString] = match;
-      const consumeSource = fromClass || fromString;
-      const detailLabel = fromType === 'Topic' || fromType === 'ServiceStream' ? 'consumes' : `${fromType} events`;
-      if (!nodes.has(consumeSource)) {
-        nodes.set(consumeSource, { id: consumeSource, name: consumeSource, type: fromType, uri: vscode.Uri.parse(`untitled:Topic/${consumeSource}`) });
-      }
-      foundEdges.push({ source: consumeSource, target: sourceNode.id, label: detailLabel, details: [] });
-    }
-
-    while ((match = produceRegex.exec(text)) !== null) {
-      const [_, toType, toName] = match;
-      if (!nodes.has(toName)) {
-        nodes.set(toName, { id: toName, name: toName, type: toType, uri: vscode.Uri.parse(`untitled:Topic/${toName}`) });
-      }
-      foundEdges.push({ source: sourceNode.id, target: toName, label: 'produces to', details: [] });
-    }
-  }
-  return foundEdges;
-}
-
-function aggregateEdges(edges: AkkaEdge[]): AkkaEdge[] {
-  const edgeMap = new Map<string, AkkaEdge>();
-
-  edges.forEach((edge) => {
-    const key = `${edge.source}->${edge.target}`;
-    const existing = edgeMap.get(key);
-
-    if (existing) {
-      if (edge.label !== 'consumes' && edge.label !== 'produces to' && !existing.details.includes(edge.label)) {
-        existing.details.push(edge.label);
-      }
-    } else {
-      const newEdge: AkkaEdge = {
-        source: edge.source,
-        target: edge.target,
-        label: '', // Will be set later
-        details: [],
-      };
-      if (edge.label !== 'consumes' && edge.label !== 'produces to') {
-        newEdge.details.push(edge.label);
-      }
-      edgeMap.set(key, newEdge);
-    }
-  });
-
-  return Array.from(edgeMap.values()).map((edge) => {
-    if (edge.details.length > 0) {
-      edge.label = `invokes (${edge.details.length} methods)`;
-    } else {
-      const originalEdge = edges.find((e) => e.source === edge.source && e.target === edge.target);
-      edge.label = originalEdge ? originalEdge.label : '';
-    }
-    return edge;
-  });
 }
 
 // --- Webview Panel Creation ---
