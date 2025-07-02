@@ -1,0 +1,373 @@
+import { parse } from 'java-parser';
+
+/**
+ * Extracts Akka component connections from a Java CST.
+ * Looks for injected ComponentClient variable name and uses it to find for*().method().invoke() chains.
+ * @param cst The CST root
+ * @param filename The filename (for debugging)
+ * @returns Array of connections: { sourceClass, targetType, targetClass, methodName, location }
+ */
+export function extractComponentConnectionsFromCST(cst: any, filename: string) {
+  const connections: Array<{
+    source: string;
+    target: string;
+    label: string;
+    details: string[];
+  }> = [];
+
+  // Helper: get class name
+  function getClassName(classDecl: any): string | undefined {
+    if (
+      classDecl &&
+      classDecl.children &&
+      classDecl.children.classDeclaration &&
+      classDecl.children.classDeclaration[0].children.normalClassDeclaration &&
+      classDecl.children.classDeclaration[0].children.normalClassDeclaration[0].children.typeIdentifier &&
+      classDecl.children.classDeclaration[0].children.normalClassDeclaration[0].children.typeIdentifier[0].children.Identifier
+    ) {
+      return classDecl.children.classDeclaration[0].children.normalClassDeclaration[0].children.typeIdentifier[0].children.Identifier[0].image;
+    }
+    return undefined;
+  }
+
+  // Helper: find injected ComponentClient field names in the class
+  function findComponentClientFieldNames(classBodyDecls: any[]): string[] {
+    const fieldNames: string[] = [];
+
+    // 1. Find constructor(s)
+    for (const bodyDecl of classBodyDecls) {
+      if (bodyDecl.children && bodyDecl.children.constructorDeclaration) {
+        const ctor = bodyDecl.children.constructorDeclaration[0];
+        // Find parameters
+        if (ctor.children.constructorDeclarator && ctor.children.constructorDeclarator[0].children.formalParameterList) {
+          const params = ctor.children.constructorDeclarator[0].children.formalParameterList[0];
+          if (params.children.formalParameter) {
+            for (const param of params.children.formalParameter) {
+              // Look for type ComponentClient - updated path based on debug output
+              if (
+                param.children &&
+                param.children.variableParaRegularParameter &&
+                param.children.variableParaRegularParameter[0].children.unannType &&
+                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType &&
+                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType &&
+                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType &&
+                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType[0].children
+                  .Identifier &&
+                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType[0].children.Identifier[0].image.includes(
+                  'ComponentClient'
+                )
+              ) {
+                // Get parameter name
+                if (
+                  param.children.variableParaRegularParameter[0].children.variableDeclaratorId &&
+                  param.children.variableParaRegularParameter[0].children.variableDeclaratorId[0].children.Identifier
+                ) {
+                  const paramName = param.children.variableParaRegularParameter[0].children.variableDeclaratorId[0].children.Identifier[0].image;
+                  // Now, look for assignments in the constructor body: this.FIELD = paramName;
+                  if (ctor.children.constructorBody && ctor.children.constructorBody[0].children.blockStatements) {
+                    for (const blockStmt of ctor.children.constructorBody[0].children.blockStatements) {
+                      if (
+                        blockStmt.children &&
+                        blockStmt.children.blockStatement &&
+                        blockStmt.children.blockStatement[0].children.statement &&
+                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement &&
+                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement &&
+                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression &&
+                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression[0]
+                          .children.expression
+                      ) {
+                        const expr =
+                          blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression[0]
+                            .children.expression[0];
+
+                        // Look deeper into the expression structure
+                        if (expr.children.conditionalExpression) {
+                          const condExpr = expr.children.conditionalExpression[0];
+
+                          if (condExpr.children.binaryExpression) {
+                            const binExpr = condExpr.children.binaryExpression[0];
+
+                            if (binExpr.children.unaryExpression) {
+                              const unaryExpr = binExpr.children.unaryExpression[0];
+
+                              if (unaryExpr.children.primary) {
+                                const primary = unaryExpr.children.primary[0];
+
+                                if (primary.children.primaryPrefix) {
+                                  const prefix = primary.children.primaryPrefix[0];
+
+                                  if (prefix.children.This) {
+                                    // Found 'this'
+                                  }
+                                }
+
+                                if (primary.children.primarySuffix) {
+                                  const suffix = primary.children.primarySuffix[0];
+
+                                  if (suffix.children.Identifier) {
+                                    const fieldName = suffix.children.Identifier[0].image;
+                                  }
+                                }
+                              }
+                            }
+
+                            if (binExpr.children.AssignmentOperator) {
+                              const assignOp = binExpr.children.AssignmentOperator[0];
+                            }
+
+                            if (binExpr.children.expression) {
+                              const rhs = binExpr.children.expression[0];
+
+                              // Look deeper into RHS to find the variable name
+                              if (rhs.children.conditionalExpression) {
+                                const rhsCond = rhs.children.conditionalExpression[0];
+
+                                if (rhsCond.children.binaryExpression) {
+                                  const rhsBin = rhsCond.children.binaryExpression[0];
+
+                                  if (rhsBin.children.unaryExpression) {
+                                    const rhsUnary = rhsBin.children.unaryExpression[0];
+
+                                    if (rhsUnary.children.primary && rhsUnary.children.primary[0].children.primaryPrefix) {
+                                      const prefix = rhsUnary.children.primary[0].children.primaryPrefix[0];
+
+                                      if (prefix.children.Identifier) {
+                                        const varName = prefix.children.Identifier[0].image;
+                                      }
+
+                                      if (prefix.children.fqnOrRefType) {
+                                        const fqn = prefix.children.fqnOrRefType[0];
+
+                                        if (fqn.children.fqnOrRefTypePartFirst) {
+                                          const partFirst = fqn.children.fqnOrRefTypePartFirst[0];
+
+                                          if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
+                                            const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
+                                            if (partCommon.children && partCommon.children.Identifier) {
+                                              const varName = partFirst.children.fqnOrRefTypePartCommon[0].children.Identifier[0].image;
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+
+                        // Check if this is an assignment: this.FIELD = paramName
+                        if (
+                          expr.children.conditionalExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primaryPrefix &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.This &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier[0].image &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.AssignmentOperator &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon[0].children
+                            .Identifier &&
+                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
+                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon[0].children
+                            .Identifier[0].image === paramName
+                        ) {
+                          // The field assigned is:
+                          const fieldName =
+                            expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier[0].image;
+                          fieldNames.push(fieldName);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return fieldNames;
+  }
+
+  // Helper: find componentClient invocation chains in method bodies
+  function findComponentClientChains(blockStmt: any, className: string, clientFieldNames: string[]) {
+    if (!blockStmt || !blockStmt.children) return;
+
+    // Recursively search for primary nodes that start with a client field and walk their primarySuffix chain
+    function searchForClientChains(node: any, path: string = '') {
+      if (!node || typeof node !== 'object') return;
+
+      if (node.children) {
+        for (const [key, children] of Object.entries(node.children)) {
+          if (Array.isArray(children)) {
+            for (let i = 0; i < children.length; i++) {
+              const child = children[i];
+              if (child && typeof child === 'object') {
+                // Look for primary nodes
+                if (key === 'primary') {
+                  const primary = child;
+                  if (primary.children && primary.children.primaryPrefix) {
+                    const prefix = primary.children.primaryPrefix[0];
+                    let varName = undefined;
+                    if (prefix.children && prefix.children.Identifier) {
+                      varName = prefix.children.Identifier[0].image;
+                    } else if (prefix.children && prefix.children.fqnOrRefType) {
+                      // Check for fqnOrRefType path
+                      const fqnRef = prefix.children.fqnOrRefType[0];
+                      if (fqnRef.children && fqnRef.children.fqnOrRefTypePartFirst) {
+                        const partFirst = fqnRef.children.fqnOrRefTypePartFirst[0];
+                        if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
+                          const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
+                          if (partCommon.children && partCommon.children.Identifier) {
+                            varName = partCommon.children.Identifier[0].image;
+                          }
+                        }
+                      }
+                    }
+                    if (varName && clientFieldNames.includes(varName)) {
+                      // Walk the primarySuffix chain
+                      const suffixes = primary.children.primarySuffix || [];
+                      let chain = [];
+
+                      // Extract the first method name from primaryPrefix.fqnOrRefType.fqnOrRefTypePartRest
+                      if (prefix.children && prefix.children.fqnOrRefType) {
+                        const fqnRef = prefix.children.fqnOrRefType[0];
+                        if (fqnRef.children && fqnRef.children.fqnOrRefTypePartRest) {
+                          const partRest = fqnRef.children.fqnOrRefTypePartRest[0];
+                          if (partRest.children && partRest.children.fqnOrRefTypePartCommon) {
+                            const partCommon = partRest.children.fqnOrRefTypePartCommon[0];
+                            if (partCommon.children && partCommon.children.Identifier) {
+                              const firstMethod = partCommon.children.Identifier[0].image;
+                              chain.push(firstMethod);
+                            }
+                          }
+                        }
+                      }
+
+                      // Extract subsequent method names from primarySuffix
+                      for (let i = 0; i < suffixes.length; i++) {
+                        const suffix = suffixes[i];
+                        if (suffix.children && suffix.children.Dot && suffix.children.Identifier) {
+                          // Extract method name from Dot.Identifier
+                          const methodName = suffix.children.Identifier[0].image;
+                          chain.push(methodName);
+                        }
+                      }
+
+                      // Look for for* -> method -> invoke pattern
+                      if (chain.length >= 3 && (chain[0].startsWith('for') || chain[0] === 'forView' || chain[0] === 'forEventSourcedEntity') && chain[1] === 'method' && chain[2] === 'invoke') {
+                        // Extract target component type from the method reference argument
+                        let targetComponentType = '';
+                        if (suffixes.length >= 3 && suffixes[2].children && suffixes[2].children.methodInvocationSuffix) {
+                          const methodInv = suffixes[2].children.methodInvocationSuffix[0];
+                          if (methodInv.children && methodInv.children.argumentList) {
+                            const argList = methodInv.children.argumentList[0];
+                            if (argList.children && argList.children.expression) {
+                              const expr = argList.children.expression[0];
+                              // Navigate to the method reference: expression -> conditionalExpression -> ... -> primary -> primaryPrefix -> fqnOrRefType -> fqnOrRefTypePartFirst -> fqnOrRefTypePartCommon -> Identifier
+                              let current = expr;
+                              while (current && current.children) {
+                                if (current.children.primary) {
+                                  const primary = current.children.primary[0];
+                                  if (primary.children && primary.children.primaryPrefix) {
+                                    const prefix = primary.children.primaryPrefix[0];
+                                    if (prefix.children && prefix.children.fqnOrRefType) {
+                                      const fqnRef = prefix.children.fqnOrRefType[0];
+                                      if (fqnRef.children && fqnRef.children.fqnOrRefTypePartFirst) {
+                                        const partFirst = fqnRef.children.fqnOrRefTypePartFirst[0];
+                                        if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
+                                          const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
+                                          if (partCommon.children && partCommon.children.Identifier) {
+                                            targetComponentType = partCommon.children.Identifier[0].image;
+                                            break;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                                // Move to the next level
+                                const nextKeys = Object.keys(current.children);
+                                if (nextKeys.length > 0) {
+                                  current = current.children[nextKeys[0]][0];
+                                } else {
+                                  break;
+                                }
+                              }
+                            }
+                          }
+                        }
+
+                        if (targetComponentType) {
+                          connections.push({
+                            source: className,
+                            target: targetComponentType,
+                            label: chain[0], // Use the first method (forView, forEventSourcedEntity, etc.) as label
+                            details: [chain[1]], // Include the 'method' call as a detail
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+                // Recursively search deeper
+                searchForClientChains(child, `${path}.${key}[${i}]`);
+              }
+            }
+          } else if (children && typeof children === 'object') {
+            searchForClientChains(children, `${path}.${key}`);
+          }
+        }
+      }
+    }
+
+    searchForClientChains(blockStmt);
+  }
+
+  if (cst.children && cst.children.ordinaryCompilationUnit && cst.children.ordinaryCompilationUnit[0].children.typeDeclaration) {
+    cst.children.ordinaryCompilationUnit[0].children.typeDeclaration.forEach((typeDecl: any) => {
+      if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
+        const classDecl = typeDecl.children.classDeclaration[0];
+        const className = getClassName(typeDecl);
+        if (classDecl.children.normalClassDeclaration[0].children.classBody && classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration) {
+          const classBodyDecls = classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration;
+          const clientFieldNames = findComponentClientFieldNames(classBodyDecls);
+
+          classBodyDecls.forEach((bodyDecl: any) => {
+            if (bodyDecl.children && bodyDecl.children.classMemberDeclaration && bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration) {
+              const methodDecl = bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration[0];
+              if (methodDecl.children.methodBody && methodDecl.children.methodBody[0].children.block && methodDecl.children.methodBody[0].children.block[0].children.blockStatements) {
+                if (className) {
+                  methodDecl.children.methodBody[0].children.block[0].children.blockStatements.forEach((blockStmt: any) => {
+                    findComponentClientChains(blockStmt, className, clientFieldNames);
+                  });
+                }
+              }
+            }
+          });
+        }
+      }
+    });
+  }
+  return connections;
+}

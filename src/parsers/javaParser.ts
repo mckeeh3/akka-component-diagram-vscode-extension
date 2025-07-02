@@ -176,14 +176,20 @@ export class JavaParser {
           args = n.children.elementValue.map((ev: any) => {
             // Try to extract the actual string value from the complex JSON structure
             const stringValue = JavaParser.extractStringValueFromElementValue(ev);
-            return stringValue || JSON.stringify(ev);
+            if (stringValue) {
+              return stringValue;
+            }
+            // If we can't extract a string value, return a truncated representation
+            const jsonStr = JSON.stringify(ev);
+            return jsonStr.length > 200 ? jsonStr.substring(0, 200) + '...' : jsonStr;
           });
         } else if (n.children && n.children.elementValuePairList) {
           // Named arguments (e.g., @Anno(key="value"))
           args = n.children.elementValuePairList.map((pair: any) => {
             if (pair.image) return pair.image;
             if (pair.escapedValue) return pair.escapedValue;
-            return JSON.stringify(pair);
+            const jsonStr = JSON.stringify(pair);
+            return jsonStr.length > 200 ? jsonStr.substring(0, 200) + '...' : jsonStr;
           });
         }
 
