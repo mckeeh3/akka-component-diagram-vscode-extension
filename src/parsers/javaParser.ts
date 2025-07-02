@@ -273,40 +273,113 @@ export class JavaParser {
     const akkaSuperclasses = ['Agent', 'EventSourcedEntity', 'KeyValueEntity', 'View', 'Consumer', 'Workflow', 'TimedAction'];
     const endpointAnnotations = ['HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
 
+    function extractStringValueFromElementValue(ev: any): string {
+      if (!ev) return '';
+      // Handle conditionalExpression -> binaryExpression -> unaryExpression -> primary -> primaryPrefix -> literal
+      if (ev.children && ev.children.conditionalExpression && ev.children.conditionalExpression[0]) {
+        const cond = ev.children.conditionalExpression[0];
+        if (cond.children && cond.children.binaryExpression && cond.children.binaryExpression[0]) {
+          const binary = cond.children.binaryExpression[0];
+          if (binary.children && binary.children.unaryExpression && binary.children.unaryExpression[0]) {
+            const unary = binary.children.unaryExpression[0];
+            if (unary.children && unary.children.primary && unary.children.primary[0]) {
+              const primary = unary.children.primary[0];
+              if (primary.children && primary.children.primaryPrefix && primary.children.primaryPrefix[0]) {
+                const primaryPrefix = primary.children.primaryPrefix[0];
+                if (primaryPrefix.children && primaryPrefix.children.literal && primaryPrefix.children.literal[0]) {
+                  const literal = primaryPrefix.children.literal[0];
+                  if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+                    const stringLiteral = literal.children.StringLiteral[0];
+                    return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+                  }
+                }
+              }
+              // Fallback: Look for literal inside primary
+              if (primary.children && primary.children.literal && primary.children.literal[0]) {
+                const literal = primary.children.literal[0];
+                if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+                  const stringLiteral = literal.children.StringLiteral[0];
+                  return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+                }
+              }
+            }
+            // Fallback: Look for literal inside unaryExpression
+            if (unary.children && unary.children.literal && unary.children.literal[0]) {
+              const literal = unary.children.literal[0];
+              if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+                const stringLiteral = literal.children.StringLiteral[0];
+                return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+              }
+            }
+          }
+          // Fallback: Look for literal directly inside binaryExpression
+          if (binary.children && binary.children.literal && binary.children.literal[0]) {
+            const literal = binary.children.literal[0];
+            if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+              const stringLiteral = literal.children.StringLiteral[0];
+              return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+            }
+          }
+        }
+      }
+      // Handle conditionalExpression (common for annotation arguments)
+      if (ev.children && ev.children.conditionalExpression && ev.children.conditionalExpression[0]) {
+        const cond = ev.children.conditionalExpression[0];
+        if (cond.children && cond.children.literal && cond.children.literal[0]) {
+          const literal = cond.children.literal[0];
+          if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+            const stringLiteral = literal.children.StringLiteral[0];
+            return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+          }
+        }
+      }
+      // Fallback to previous logic
+      if (ev.children && ev.children.literal && ev.children.literal[0]) {
+        const literal = ev.children.literal[0];
+        if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+          const stringLiteral = literal.children.StringLiteral[0];
+          return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+        }
+      }
+      return '';
+    }
+
     function recurse(n: any) {
       if (n && n.name === 'classDeclaration') {
         let className = '';
         let superclassName = '';
+        let hasComponentId = false;
+        let componentIdValue = '';
+        let endpointType = '';
+        let endpointValue = '';
 
+        // Extract class name
         if (n.children && n.children.normalClassDeclaration && n.children.normalClassDeclaration[0]) {
-          const classDecl = n.children.normalClassDeclaration[0];
-
-          // Extract class name from typeIdentifier.children.Identifier[0].image
-          if (classDecl.children && classDecl.children.typeIdentifier && classDecl.children.typeIdentifier[0]) {
-            const typeIdentifier = classDecl.children.typeIdentifier[0];
+          const normalClass = n.children.normalClassDeclaration[0];
+          if (normalClass.children && normalClass.children.typeIdentifier && normalClass.children.typeIdentifier[0]) {
+            const typeIdentifier = normalClass.children.typeIdentifier[0];
             if (typeIdentifier.children && typeIdentifier.children.Identifier && typeIdentifier.children.Identifier[0]) {
               className = typeIdentifier.children.Identifier[0].image || '';
             }
           }
-
-          // Extract superclass from classExtends.children.classType[0].children.Identifier[0].image
-          if (classDecl.children && classDecl.children.classExtends && classDecl.children.classExtends[0]) {
-            const classExtends = classDecl.children.classExtends[0];
+          // Extract superclass from classExtends
+          if (normalClass.children && normalClass.children.classExtends && normalClass.children.classExtends[0]) {
+            const classExtends = normalClass.children.classExtends[0];
             if (classExtends.children && classExtends.children.classType && classExtends.children.classType[0]) {
               const classType = classExtends.children.classType[0];
               if (classType.children && classType.children.Identifier && classType.children.Identifier[0]) {
                 superclassName = classType.children.Identifier[0].image || '';
+              } else if (classType.children && classType.children.classOrInterfaceType && classType.children.classOrInterfaceType[0]) {
+                const nested = classType.children.classOrInterfaceType[0];
+                if (nested.children && nested.children.Identifier && nested.children.Identifier[0]) {
+                  superclassName = nested.children.Identifier[0].image || '';
+                }
               }
             }
           }
         }
 
         // Check for annotations on the class
-        let hasComponentId = false;
-        let componentIdValue = '';
-        let endpointType = '';
-        let endpointValue = '';
-
         if (n.children && n.children.classModifier) {
           for (const modifier of n.children.classModifier) {
             if (modifier.children && modifier.children.annotation) {
@@ -319,34 +392,28 @@ export class JavaParser {
                     annotationName = typeNameNode.children.Identifier[0].image || '';
                   }
                 }
-
                 if (annotationName === 'ComponentId') {
                   hasComponentId = true;
-                  // Extract ComponentId value
                   if (annotation.children && annotation.children.elementValue) {
                     const ev = annotation.children.elementValue[0];
-                    const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                    const stringValue = extractStringValueFromElementValue(ev);
                     componentIdValue = stringValue || '';
                   }
                 } else if (endpointAnnotations.includes(annotationName)) {
                   endpointType = annotationName;
-                  // Extract endpoint value - handle different argument formats
                   if (annotation.children && annotation.children.elementValue) {
-                    // Single argument (e.g., @HttpEndpoint("/path"))
                     const ev = annotation.children.elementValue[0];
-                    const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                    const stringValue = extractStringValueFromElementValue(ev);
                     endpointValue = stringValue || '';
                   } else if (annotation.children && annotation.children.elementValuePairList) {
-                    // Named arguments (e.g., @MCPEndpoint(name="service", port=8080))
                     const pairs = annotation.children.elementValuePairList;
                     const namePair = pairs.find((pair: any) => pair.children && pair.children.Identifier && pair.children.Identifier[0] && pair.children.Identifier[0].image === 'name');
                     if (namePair && namePair.children && namePair.children.elementValue) {
                       const ev = namePair.children.elementValue[0];
-                      const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                      const stringValue = extractStringValueFromElementValue(ev);
                       endpointValue = stringValue || '';
                     }
                   }
-                  // If no arguments found, use the annotation name as the ID
                   if (!endpointValue) {
                     endpointValue = annotationName.toLowerCase();
                   }
@@ -356,18 +423,16 @@ export class JavaParser {
           }
         }
 
-        // Check if it's an Akka component based on superclass + ComponentId
-        if (hasComponentId && akkaSuperclasses.includes(superclassName)) {
-          const componentType = superclassName;
+        // Add superclass-based component if it has ComponentId and extends Akka superclass
+        if (hasComponentId && componentIdValue && akkaSuperclasses.includes(superclassName)) {
           components.push({
             filename,
             className,
-            componentType,
+            componentType: superclassName,
             componentId: componentIdValue,
           });
         }
-
-        // Check if it's an endpoint component (annotation-based)
+        // Add endpoint-based component if it has endpoint annotation
         if (endpointType && endpointValue) {
           components.push({
             filename,
@@ -377,18 +442,16 @@ export class JavaParser {
           });
         }
       }
-
       // Recurse into children
-      if (n && n.children) {
-        for (const value of Object.values(n.children)) {
-          if (Array.isArray(value)) {
-            value.forEach((child) => {
-              if (child && typeof child === 'object') {
-                recurse(child);
-              }
-            });
-          } else if (value && typeof value === 'object') {
-            recurse(value);
+      if (n.children) {
+        for (const childKey in n.children) {
+          const children = n.children[childKey];
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              recurse(child);
+            }
+          } else if (children) {
+            recurse(children);
           }
         }
       }
