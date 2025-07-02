@@ -131,6 +131,43 @@ export function activate(context: vscode.ExtensionContext) {
       });
     }
 
+    // --- Extract Akka Components from CST ---
+    console.log(`[Extension] Starting Akka component extraction from CST...`);
+    outputChannel.appendLine(`[Extension] Starting Akka component extraction from CST...`);
+
+    const allAkkaComponents: Array<{
+      filename: string;
+      className: string;
+      componentType: string;
+      componentId: string;
+    }> = [];
+
+    for (const result of successfulParses) {
+      if (result.ast) {
+        const components = JavaParser.extractAkkaComponentsFromCST(result.ast, result.filename);
+        allAkkaComponents.push(...components);
+
+        console.log(`[Extension] File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
+        outputChannel.appendLine(`[Extension] File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
+
+        // Log each component for debugging
+        components.forEach((component, index) => {
+          console.log(`[Extension]   Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+          outputChannel.appendLine(`[Extension]   Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+        });
+      }
+    }
+
+    console.log(`[Extension] Found ${allAkkaComponents.length} Akka components across all files`);
+    outputChannel.appendLine(`[Extension] Found ${allAkkaComponents.length} Akka components across all files`);
+
+    if (allAkkaComponents.length > 0) {
+      allAkkaComponents.forEach((component, index) => {
+        console.log(`[Extension]   Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+        outputChannel.appendLine(`[Extension]   Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+      });
+    }
+
     outputChannel.appendLine(`[Extension] Starting regex-based component detection...`);
     const parsedNodes = await parseNodes(javaFiles, outputChannel);
     const foundEdges = await parseEdges(parsedNodes, outputChannel);

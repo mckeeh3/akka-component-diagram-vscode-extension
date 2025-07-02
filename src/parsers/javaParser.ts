@@ -250,4 +250,116 @@ export class JavaParser {
     }
     return null;
   }
+
+  /**
+   * Extract Akka component information from a CST node.
+   * Returns an array of { filename, className, componentType, componentId } objects.
+   */
+  static extractAkkaComponentsFromCST(
+    node: any,
+    filename: string
+  ): Array<{
+    filename: string;
+    className: string;
+    componentType: string;
+    componentId: string;
+  }> {
+    const components: Array<{
+      filename: string;
+      className: string;
+      componentType: string;
+      componentId: string;
+    }> = [];
+    const akkaSuperclasses = ['Agent', 'EventSourcedEntity', 'KeyValueEntity', 'View', 'Consumer', 'Workflow', 'TimedAction'];
+
+    function recurse(n: any) {
+      if (n && n.name === 'classDeclaration') {
+        let className = '';
+        let superclassName = '';
+
+        if (n.children && n.children.normalClassDeclaration && n.children.normalClassDeclaration[0]) {
+          const classDecl = n.children.normalClassDeclaration[0];
+
+          // Extract class name from typeIdentifier.children.Identifier[0].image
+          if (classDecl.children && classDecl.children.typeIdentifier && classDecl.children.typeIdentifier[0]) {
+            const typeIdentifier = classDecl.children.typeIdentifier[0];
+            if (typeIdentifier.children && typeIdentifier.children.Identifier && typeIdentifier.children.Identifier[0]) {
+              className = typeIdentifier.children.Identifier[0].image || '';
+            }
+          }
+
+          // Extract superclass from classExtends.children.classType[0].children.Identifier[0].image
+          if (classDecl.children && classDecl.children.classExtends && classDecl.children.classExtends[0]) {
+            const classExtends = classDecl.children.classExtends[0];
+            if (classExtends.children && classExtends.children.classType && classExtends.children.classType[0]) {
+              const classType = classExtends.children.classType[0];
+              if (classType.children && classType.children.Identifier && classType.children.Identifier[0]) {
+                superclassName = classType.children.Identifier[0].image || '';
+              }
+            }
+          }
+        }
+
+        // Check for annotations on the class
+        let hasComponentId = false;
+        let componentIdValue = '';
+
+        if (n.children && n.children.classModifier) {
+          for (const modifier of n.children.classModifier) {
+            if (modifier.children && modifier.children.annotation) {
+              for (const annotation of modifier.children.annotation) {
+                // Extract annotation name
+                let annotationName = '';
+                if (annotation.children && annotation.children.typeName && annotation.children.typeName[0]) {
+                  const typeNameNode = annotation.children.typeName[0];
+                  if (typeNameNode.children && typeNameNode.children.Identifier && typeNameNode.children.Identifier[0]) {
+                    annotationName = typeNameNode.children.Identifier[0].image || '';
+                  }
+                }
+
+                if (annotationName === 'ComponentId') {
+                  hasComponentId = true;
+                  // Extract ComponentId value
+                  if (annotation.children && annotation.children.elementValue) {
+                    const ev = annotation.children.elementValue[0];
+                    const stringValue = JavaParser.extractStringValueFromElementValue(ev);
+                    componentIdValue = stringValue || '';
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Check if it's an Akka component
+        if (hasComponentId && akkaSuperclasses.includes(superclassName)) {
+          const componentType = superclassName;
+          components.push({
+            filename,
+            className,
+            componentType,
+            componentId: componentIdValue,
+          });
+        }
+      }
+
+      // Recurse into children
+      if (n && n.children) {
+        for (const value of Object.values(n.children)) {
+          if (Array.isArray(value)) {
+            value.forEach((child) => {
+              if (child && typeof child === 'object') {
+                recurse(child);
+              }
+            });
+          } else if (value && typeof value === 'object') {
+            recurse(value);
+          }
+        }
+      }
+    }
+
+    recurse(node);
+    return components;
+  }
 }
