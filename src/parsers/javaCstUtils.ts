@@ -3,8 +3,10 @@ import { parse } from 'java-parser';
 /**
  * Extracts Akka component connections from a Java CST.
  * Looks for injected ComponentClient variable name and uses it to find for*().method().invoke() chains.
+ * Also looks for @Consume.From... annotations.
  * @param cst The CST root
  * @param filename The filename (for debugging)
+ * @param sourceText The source text (for extracting method parameters)
  * @returns Array of connections: { sourceClass, targetType, targetClass, methodName, location }
  */
 export function extractComponentConnectionsFromCST(cst: any, filename: string, sourceText?: string) {
@@ -138,7 +140,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                                       if (prefix.children.fqnOrRefType) {
                                         const fqn = prefix.children.fqnOrRefType[0];
 
-                                        if (fqn.children.fqnOrRefTypePartFirst) {
+                                        if (fqn.children && fqn.children.fqnOrRefTypePartFirst) {
                                           const partFirst = fqn.children.fqnOrRefTypePartFirst[0];
 
                                           if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
@@ -357,6 +359,95 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     searchForClientChains(blockStmt);
   }
 
+  // Helper: extract all annotations from CST
+  function extractAllAnnotations(cst: any): Array<{ annotation: any; className: string }> {
+    const annotations: Array<{ annotation: any; className: string }> = [];
+
+    function findAnnotations(node: any, className: string) {
+      if (!node || typeof node !== 'object') return;
+
+      if (node.children) {
+        for (const [key, children] of Object.entries(node.children)) {
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              if (child && typeof child === 'object') {
+                // Look for annotation nodes
+                if (key === 'annotation') {
+                  annotations.push({ annotation: child, className });
+                }
+                // Recursively search deeper
+                findAnnotations(child, className);
+              }
+            }
+          } else if (children && typeof children === 'object') {
+            findAnnotations(children, className);
+          }
+        }
+      }
+    }
+
+    // Find annotations in all classes
+    if (cst.children && cst.children.ordinaryCompilationUnit && cst.children.ordinaryCompilationUnit[0].children.typeDeclaration) {
+      cst.children.ordinaryCompilationUnit[0].children.typeDeclaration.forEach((typeDecl: any) => {
+        if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
+          const className = getClassName(typeDecl);
+          if (className) {
+            findAnnotations(typeDecl, className);
+          }
+        }
+      });
+    }
+
+    return annotations;
+  }
+
+  // Helper: extract consume annotations from annotations list
+  function extractConsumeAnnotationsFromList(annotations: Array<{ annotation: any; className: string }>) {
+    for (const { annotation, className } of annotations) {
+      // Use the annotation location to extract the full annotation text
+      if (annotation.location && annotation.location.startOffset !== undefined && annotation.location.endOffset !== undefined) {
+        console.log(`[CST] Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
+
+        if (sourceText) {
+          const annotationText = sourceText.substring(annotation.location.startOffset, annotation.location.endOffset + 1);
+          console.log(`[CST] Annotation text: "${annotationText}"`);
+
+          // Check if this is a @Consume annotation and parse it
+          if (annotationText.startsWith('@Consume')) {
+            console.log(`[CST] Found @Consume annotation in class: ${className}`);
+
+            // Parse the @Consume.FromType(ClassName.class) format
+            const consumeMatch = annotationText.match(/@Consume\.From(\w+)\(([^)]+)\)/);
+            if (consumeMatch) {
+              const consumeType = consumeMatch[1];
+              const sourceClassParam = consumeMatch[2];
+              console.log(`[CST] Found consume type: ${consumeType}, source class param: ${sourceClassParam}`);
+
+              // Extract the class name from the parameter (remove .class if present)
+              const sourceClass = sourceClassParam.replace(/\.class$/, '');
+              console.log(`[CST] Extracted source class: ${sourceClass}`);
+
+              // Create connection from source class to current class
+              const detailLabel = consumeType === 'Topic' || consumeType === 'ServiceStream' ? 'consumes' : `${consumeType} events`;
+              connections.push({
+                source: sourceClass,
+                target: className,
+                label: detailLabel,
+                details: [],
+              });
+            } else {
+              console.log(`[CST] Could not parse consume annotation: "${annotationText}"`);
+            }
+          }
+        } else {
+          console.log(`[CST] No source text provided, cannot extract annotation`);
+        }
+      } else {
+        console.log(`[CST] No location information available for annotation`);
+      }
+    }
+  }
+
   if (cst.children && cst.children.ordinaryCompilationUnit && cst.children.ordinaryCompilationUnit[0].children.typeDeclaration) {
     cst.children.ordinaryCompilationUnit[0].children.typeDeclaration.forEach((typeDecl: any) => {
       if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
@@ -383,5 +474,12 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
       }
     });
   }
+
+  // Extract all annotations and process consume annotations
+  console.log(`[CST] Extracting all annotations from CST...`);
+  const allAnnotations = extractAllAnnotations(cst);
+  console.log(`[CST] Found ${allAnnotations.length} total annotations`);
+  extractConsumeAnnotationsFromList(allAnnotations);
+
   return connections;
 }
