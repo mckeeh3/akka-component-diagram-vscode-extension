@@ -7,7 +7,7 @@ import { parse } from 'java-parser';
  * @param filename The filename (for debugging)
  * @returns Array of connections: { sourceClass, targetType, targetClass, methodName, location }
  */
-export function extractComponentConnectionsFromCST(cst: any, filename: string) {
+export function extractComponentConnectionsFromCST(cst: any, filename: string, sourceText?: string) {
   const connections: Array<{
     source: string;
     target: string;
@@ -275,55 +275,68 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string) {
                       }
 
                       // Look for for* -> method -> invoke pattern
-                      if (chain.length >= 3 && (chain[0].startsWith('for') || chain[0] === 'forView' || chain[0] === 'forEventSourcedEntity') && chain[1] === 'method' && chain[2] === 'invoke') {
-                        // Extract target component type from the method reference argument
+                      console.log(`[CST] Checking chain: ${chain.join(' -> ')}`);
+                      if (
+                        chain.length >= 3 &&
+                        (chain[0].startsWith('for') || chain[0] === 'forView' || chain[0] === 'forEventSourcedEntity') &&
+                        chain[1] === 'method' &&
+                        (chain[2] === 'invoke' || chain[2] === 'invokeAsync')
+                      ) {
+                        console.log(`[CST] Found valid chain pattern: ${chain.join(' -> ')}`);
+                        // Extract target component type and method name from the method reference argument
                         let targetComponentType = '';
+                        let calledMethodName = '';
                         if (suffixes.length >= 3 && suffixes[2].children && suffixes[2].children.methodInvocationSuffix) {
                           const methodInv = suffixes[2].children.methodInvocationSuffix[0];
                           if (methodInv.children && methodInv.children.argumentList) {
                             const argList = methodInv.children.argumentList[0];
                             if (argList.children && argList.children.expression) {
                               const expr = argList.children.expression[0];
-                              // Navigate to the method reference: expression -> conditionalExpression -> ... -> primary -> primaryPrefix -> fqnOrRefType -> fqnOrRefTypePartFirst -> fqnOrRefTypePartCommon -> Identifier
-                              let current = expr;
-                              while (current && current.children) {
-                                if (current.children.primary) {
-                                  const primary = current.children.primary[0];
-                                  if (primary.children && primary.children.primaryPrefix) {
-                                    const prefix = primary.children.primaryPrefix[0];
-                                    if (prefix.children && prefix.children.fqnOrRefType) {
-                                      const fqnRef = prefix.children.fqnOrRefType[0];
-                                      if (fqnRef.children && fqnRef.children.fqnOrRefTypePartFirst) {
-                                        const partFirst = fqnRef.children.fqnOrRefTypePartFirst[0];
-                                        if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
-                                          const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
-                                          if (partCommon.children && partCommon.children.Identifier) {
-                                            targetComponentType = partCommon.children.Identifier[0].image;
-                                            break;
-                                          }
-                                        }
-                                      }
-                                    }
+
+                              // Use the location offsets to extract the method parameter directly from source text
+                              if (methodInv.location && methodInv.location.startOffset !== undefined && methodInv.location.endOffset !== undefined) {
+                                console.log(`[CST] Method invocation location: ${methodInv.location.startOffset} to ${methodInv.location.endOffset}`);
+
+                                // Extract the method parameter text directly from source
+                                if (sourceText) {
+                                  const methodParamText = sourceText.substring(methodInv.location.startOffset, methodInv.location.endOffset + 1);
+                                  console.log(`[CST] Method parameter text: "${methodParamText}"`);
+
+                                  // Parse the ClassName::methodName format
+                                  const parts = methodParamText.split('::');
+                                  if (parts.length === 2) {
+                                    targetComponentType = parts[0];
+                                    calledMethodName = parts[1];
+                                    console.log(`[CST] Extracted from text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
+                                  } else {
+                                    console.log(`[CST] Could not parse method parameter: "${methodParamText}"`);
                                   }
-                                }
-                                // Move to the next level
-                                const nextKeys = Object.keys(current.children);
-                                if (nextKeys.length > 0) {
-                                  current = current.children[nextKeys[0]][0];
                                 } else {
-                                  break;
+                                  console.log(`[CST] No source text provided, cannot extract method name`);
                                 }
+                              } else {
+                                console.log(`[CST] No location information available for method invocation`);
                               }
                             }
                           }
                         }
 
+                        // Method name extraction is now done in the same loop where we find the class name
+
                         if (targetComponentType) {
+                          const details = []; // Start with empty details array
+                          if (calledMethodName) {
+                            details.push(calledMethodName); // Add only the called method name
+                          }
+                          console.log(`[CST] Found connection: ${className} -> ${targetComponentType} (${chain[0]})`);
+                          console.log(`[CST] Chain: ${chain.join(' -> ')}`);
+                          console.log(`[CST] Called method name: ${calledMethodName}`);
+                          console.log(`[CST] Details array: ${JSON.stringify(details)}`);
                           connections.push({
                             source: className,
                             target: targetComponentType,
                             label: chain[0], // Use the first method (forView, forEventSourcedEntity, etc.) as label
-                            details: [chain[1]], // Include the 'method' call as a detail
+                            details: details,
                           });
                         }
                       }
@@ -352,6 +365,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string) {
         if (classDecl.children.normalClassDeclaration[0].children.classBody && classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration) {
           const classBodyDecls = classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration;
           const clientFieldNames = findComponentClientFieldNames(classBodyDecls);
+          console.log(`[CST] Found ComponentClient field names in ${className}: ${clientFieldNames.join(', ')}`);
 
           classBodyDecls.forEach((bodyDecl: any) => {
             if (bodyDecl.children && bodyDecl.children.classMemberDeclaration && bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration) {

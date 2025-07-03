@@ -58,7 +58,6 @@ export function activate(context: vscode.ExtensionContext) {
       outputChannel.appendLine(`[Extension] Searching for Java files with pattern: ${pattern.pattern}`);
 
       const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
-      outputChannel.appendLine(`[Extension] Found ${javaFiles.length} Java files to scan`);
 
       if (javaFiles.length === 0) {
         vscode.window.showWarningMessage('No Java files found in the selected folder.');
@@ -212,18 +211,18 @@ export function activate(context: vscode.ExtensionContext) {
       // Log all found edges from regex parsing
       if (aggregatedEdges.length > 0) {
         outputChannel.appendLine(`[Extension] Found ${aggregatedEdges.length} edges from regex parsing:`);
-        console.log(`[Extension] Found ${aggregatedEdges.length} edges from regex parsing:`);
+        console.log(`[RegEx] Found ${aggregatedEdges.length} edges from regex parsing:`);
         aggregatedEdges.forEach((edge, index) => {
-          outputChannel.appendLine(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          outputChannel.appendLine(`[RegEx]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          console.log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          console.log(`[RegEx]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
-            outputChannel.appendLine(`[Extension]     Details: ${edge.details.join(', ')}`);
+            outputChannel.appendLine(`[RegEx]     Details: ${edge.details.join(', ')}`);
           }
         });
       } else {
-        outputChannel.appendLine(`[Extension] No edges found from regex parsing`);
-        console.log(`[Extension] No edges found from regex parsing`);
+        outputChannel.appendLine(`[RegEx] No edges found from regex parsing`);
+        console.log(`[RegEx] No edges found from regex parsing`);
       }
 
       // --- CST-based Edge Detection ---
@@ -236,10 +235,14 @@ export function activate(context: vscode.ExtensionContext) {
       for (const result of successfulParses) {
         if (result.ast) {
           outputChannel.appendLine(`[Extension] Processing CST for file: ${path.basename(result.filename)}`);
-          const connections = extractComponentConnectionsFromCST(result.ast, result.filename);
+          // Get the source text for the file
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+          const connections = extractComponentConnectionsFromCST(result.ast, result.filename, sourceText);
 
           if (connections.length > 0) {
             outputChannel.appendLine(`[Extension]   Found ${connections.length} connections in ${path.basename(result.filename)}:`);
+            console.log(`[Extension]   Found ${connections.length} connections in ${path.basename(result.filename)}:`);
             connections.forEach((conn, index) => {
               const edge: AkkaEdge = {
                 source: conn.source,
@@ -249,12 +252,20 @@ export function activate(context: vscode.ExtensionContext) {
               };
               cstEdges.push(edge);
               outputChannel.appendLine(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
+              let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
+              console.log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
               if (conn.details && conn.details.length > 0) {
                 outputChannel.appendLine(`[Extension]       Details: ${conn.details.join(', ')}`);
+                // Add specific logging for method names
+                if (conn.details.length > 0) {
+                  outputChannel.appendLine(`[Extension]       Method names: ${conn.details.join(', ')}`);
+                  console.log(`[Extension]       Method names: ${conn.details.join(', ')}`);
+                }
               }
             });
           } else {
             outputChannel.appendLine(`[Extension]   No connections found in ${path.basename(result.filename)}`);
+            console.log(`[Extension]   No connections found in ${path.basename(result.filename)}`);
           }
         }
       }
@@ -266,27 +277,84 @@ export function activate(context: vscode.ExtensionContext) {
         cstEdges.forEach((edge, index) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
           console.log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          // Add specific logging for method names
+          if (edge.details && edge.details.length > 0) {
+            console.log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+          }
         });
+        console.log(`[Extension] CST-based edge detection ===== end edge lists. `);
       } else {
         console.log(`[Extension] No edges found from CST-based detection`);
       }
 
-      // Combine edges from both methods
-      const allEdges = [...aggregatedEdges, ...cstEdges];
-      outputChannel.appendLine(`[Extension] Total edges found: ${allEdges.length} (${aggregatedEdges.length} from regex + ${cstEdges.length} from CST)`);
+      // Combine edges from both methods with deduplication to prevent overlap
+      outputChannel.appendLine(`[Extension] ========================================`);
+      outputChannel.appendLine(`[Extension] COMBINING EDGES WITH DEDUPLICATION`);
+      outputChannel.appendLine(`[Extension] ========================================`);
 
-      // Log all combined edges
+      // Create a Set to track unique edges and prevent overlap
+      const uniqueEdges = new Map<string, AkkaEdge>();
+
+      // Helper function to create a unique key for an edge
+      const createEdgeKey = (edge: AkkaEdge): string => {
+        return `${edge.source}->${edge.target}->${edge.label}`;
+      };
+
+      // Add regex edges first
+      outputChannel.appendLine(`[Extension] Adding ${aggregatedEdges.length} regex edges to unique set`);
+      aggregatedEdges.forEach((edge, index) => {
+        const key = createEdgeKey(edge);
+        if (!uniqueEdges.has(key)) {
+          uniqueEdges.set(key, edge);
+          outputChannel.appendLine(`[Extension]   Added regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+        } else {
+          outputChannel.appendLine(`[Extension]   Skipped duplicate regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+        }
+      });
+
+      // Add CST edges, but skip if already present from regex
+      outputChannel.appendLine(`[Extension] Adding ${cstEdges.length} CST edges to unique set (skipping duplicates)`);
+      cstEdges.forEach((edge, index) => {
+        const key = createEdgeKey(edge);
+        if (!uniqueEdges.has(key)) {
+          uniqueEdges.set(key, edge);
+          outputChannel.appendLine(`[Extension]   Added CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          console.log(`[Extension]   Added CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          // Log method names for added CST edges
+          if (edge.details && edge.details.length > 0) {
+            outputChannel.appendLine(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            console.log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+          }
+        } else {
+          outputChannel.appendLine(`[Extension]   Skipped duplicate CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label}) - already found by regex`);
+          console.log(`[Extension]   Skipped duplicate CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label}) - already found by regex`);
+        }
+      });
+
+      const allEdges = Array.from(uniqueEdges.values());
+      outputChannel.appendLine(
+        `[Extension] Deduplication complete. Final unique edges: ${allEdges.length} (${aggregatedEdges.length} from regex + ${cstEdges.length} from CST, with duplicates removed)`
+      );
+
+      // Log all final unique edges
       if (allEdges.length > 0) {
-        outputChannel.appendLine(`[Extension] All edges found:`);
-        console.log(`[Extension] All edges found (${allEdges.length}):`);
+        outputChannel.appendLine(`[Extension] Final unique edges found:`);
+        console.log(`[Extension] Final unique edges found (${allEdges.length}):`);
         allEdges.forEach((edge, index) => {
           outputChannel.appendLine(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
           console.log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
             outputChannel.appendLine(`[Extension]     Details: ${edge.details.join(', ')}`);
+            // Add specific logging for method names
+            if (edge.details.length > 0) {
+              outputChannel.appendLine(`[Extension]     Method names: ${edge.details.join(', ')}`);
+              console.log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            }
           }
         });
+        outputChannel.appendLine(`[Extension] Final unique edges ===== end edge lists. `);
+        console.log(`[Extension] Final unique edges ===== end edge lists. `);
       } else {
         outputChannel.appendLine(`[Extension] No edges found in the project`);
         console.log(`[Extension] No edges found in the project`);

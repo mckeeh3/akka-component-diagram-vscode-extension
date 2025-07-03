@@ -7,11 +7,11 @@ export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLi
     console.log(msg);
     if (outputChannel) outputChannel.appendLine(msg);
   };
-  log(`[AkkaParser] Starting to parse ${files.length} files for components`);
+  log(`[RegEx] Starting to parse ${files.length} files for components`);
   const parsedNodes = new Map<string, AkkaComponent>();
 
   for (const file of files) {
-    log(`[AkkaParser] Processing file: ${file.fsPath}`);
+    log(`[RegEx] Processing file: ${file.fsPath}`);
     const document = await vscode.workspace.openTextDocument(file);
     const text = document.getText();
     const componentRegex = /@(ComponentId|HttpEndpoint|GrpcEndpoint)(?:\("([^"]+)"\))?[\s\S]*?public\s+class\s+(\w+)(?:\s+(?:extends|implements)\s+(\w+))?/g;
@@ -22,7 +22,7 @@ export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLi
       const [_, annotationType, componentId, className, extendedOrImplementedClass] = match;
       let componentType: string = annotationType === 'ComponentId' ? extendedOrImplementedClass || 'Unknown' : annotationType;
 
-      log(`[AkkaParser] Found component: ${className} (${annotationType}) with type: ${componentType}`);
+      log(`[RegEx] Found component: ${className} (${annotationType}) with type: ${componentType}`);
 
       if (!parsedNodes.has(className)) {
         parsedNodes.set(className, {
@@ -34,10 +34,10 @@ export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLi
         fileComponentCount++;
       }
     }
-    log(`[AkkaParser] File ${path.basename(file.fsPath)}: found ${fileComponentCount} components`);
+    log(`[RegEx] File ${path.basename(file.fsPath)}: found ${fileComponentCount} components`);
   }
 
-  log(`[AkkaParser] Total components found: ${parsedNodes.size}`);
+  log(`[RegEx] Total components found: ${parsedNodes.size}`);
   return parsedNodes;
 }
 
@@ -46,7 +46,7 @@ export async function parseEdges(nodes: Map<string, AkkaComponent>, outputChanne
     console.log(msg);
     if (outputChannel) outputChannel.appendLine(msg);
   };
-  log(`[AkkaParser] Starting to parse edges for ${nodes.size} nodes`);
+  log(`[RegEx] Starting to parse edges for ${nodes.size} nodes`);
   const foundEdges: AkkaEdge[] = [];
   for (const sourceNode of nodes.values()) {
     if (sourceNode.uri.scheme === 'untitled') continue;
