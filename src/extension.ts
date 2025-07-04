@@ -3,7 +3,7 @@ import * as path from 'path';
 import { getWebviewContent } from './webview/webviewManager';
 import { JavaParser } from './parsers/javaParser';
 import { parseNodes, parseEdges, aggregateEdges } from './parsers/akkaParser';
-import { extractComponentConnectionsFromCST } from './parsers/javaCstUtils';
+import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './parsers/javaCstUtils';
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 
 // --- Type Definitions ---
@@ -99,7 +99,6 @@ export function activate(context: vscode.ExtensionContext) {
       // Debug: Log CST structure for first successful parse
       if (successfulParses.length > 0) {
         log(`[Extension] Debugging CST structure for: ${successfulParses[0].filename}`);
-        // JavaParser.debugCST(successfulParses[0].cst!); // Commented out to avoid massive CST output
       }
 
       // --- Extract Annotations from CST ---
@@ -123,11 +122,21 @@ export function activate(context: vscode.ExtensionContext) {
 
           log(`[Extension] File ${path.basename(result.filename)}: Found ${annotations.length} annotations`);
 
+          // Get the source text for this file
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+
           // Log each annotation for debugging
           annotations.forEach((annotation, index) => {
             const locationInfo = annotation.location ? `line ${annotation.location.startLine}, col ${annotation.location.startColumn}` : 'unknown location';
 
             log(`[Extension]   Annotation ${index + 1}: ${annotation.name} at ${locationInfo}`);
+
+            // Log the actual source code for the annotation
+            if (annotation.location && sourceText) {
+              const annotationSourceCode = extractSourceAtLocation(sourceText, annotation.location);
+              log(`[Extension]     Source code: "${annotationSourceCode}"`);
+            }
 
             if (annotation.arguments && annotation.arguments.length > 0) {
               log(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
@@ -235,9 +244,9 @@ export function activate(context: vscode.ExtensionContext) {
               };
               cstEdges.push(edge);
               log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
-              let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
-              log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
               if (conn.details && conn.details.length > 0) {
+                let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
+                log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
                 log(`[Extension]       Details: ${conn.details.join(', ')}`);
                 // Add specific logging for method names
                 if (conn.details.length > 0) {

@@ -22,7 +22,7 @@ export function extractSourceAtLocation(sourceText: string, location: { startOff
     return '';
   }
 
-  return sourceText.substring(location.startOffset, location.endOffset);
+  return sourceText.substring(location.startOffset, location.endOffset + 1);
 }
 
 /**
@@ -329,14 +329,18 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                                   const methodParamText = extractSourceAtLocation(sourceText, methodInv.location);
                                   console.log(`[CST] Method parameter text: "${methodParamText}"`);
 
+                                  // Remove parentheses from the extracted text
+                                  const cleanParamText = methodParamText.replace(/^\(|\)$/g, '');
+                                  console.log(`[CST] Clean parameter text: "${cleanParamText}"`);
+
                                   // Parse the ClassName::methodName format
-                                  const parts = methodParamText.split('::');
+                                  const parts = cleanParamText.split('::');
                                   if (parts.length === 2) {
                                     targetComponentType = parts[0];
                                     calledMethodName = parts[1];
                                     console.log(`[CST] Extracted from text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
                                   } else {
-                                    console.log(`[CST] Could not parse method parameter: "${methodParamText}"`);
+                                    console.log(`[CST] Could not parse method parameter: "${cleanParamText}"`);
                                   }
                                 } else {
                                   console.log(`[CST] No source text provided, cannot extract method name`);
