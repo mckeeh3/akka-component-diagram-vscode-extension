@@ -1,4 +1,29 @@
 import { parse } from 'java-parser';
+import { AkkaComponent, AkkaEdge } from '../models/types';
+
+/**
+ * Utility function to extract Java source code from a CST node location
+ * @param sourceText The complete Java source code
+ * @param location The CST node location with startOffset and endOffset
+ * @returns The Java source code at the specified location, or empty string if location is invalid
+ *
+ * @example
+ * const sourceText = "public class MyClass { public void method() { } }";
+ * const location = { startOffset: 13, endOffset: 20 }; // "MyClass"
+ * const extracted = extractSourceAtLocation(sourceText, location);
+ * // Returns: "MyClass"
+ */
+export function extractSourceAtLocation(sourceText: string, location: { startOffset: number; endOffset: number }): string {
+  if (!sourceText || !location || typeof location.startOffset !== 'number' || typeof location.endOffset !== 'number') {
+    return '';
+  }
+
+  if (location.startOffset < 0 || location.endOffset > sourceText.length || location.startOffset > location.endOffset) {
+    return '';
+  }
+
+  return sourceText.substring(location.startOffset, location.endOffset);
+}
 
 /**
  * Extracts Akka component connections from a Java CST.
@@ -301,7 +326,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
 
                                 // Extract the method parameter text directly from source
                                 if (sourceText) {
-                                  const methodParamText = sourceText.substring(methodInv.location.startOffset, methodInv.location.endOffset + 1);
+                                  const methodParamText = extractSourceAtLocation(sourceText, methodInv.location);
                                   console.log(`[CST] Method parameter text: "${methodParamText}"`);
 
                                   // Parse the ClassName::methodName format
@@ -409,7 +434,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
         console.log(`[CST] Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
 
         if (sourceText) {
-          const annotationText = sourceText.substring(annotation.location.startOffset, annotation.location.endOffset + 1);
+          const annotationText = extractSourceAtLocation(sourceText, annotation.location);
           console.log(`[CST] Annotation text: "${annotationText}"`);
 
           // Check if this is a @Consume annotation and parse it

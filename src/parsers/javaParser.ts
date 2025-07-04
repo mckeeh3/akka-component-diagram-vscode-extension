@@ -2,13 +2,13 @@ import * as vscode from 'vscode';
 import * as javaParser from 'java-parser';
 
 // Type definitions for java-parser
-interface JavaAST {
+interface JavaCST {
   [key: string]: any;
 }
 
 interface ParseResult {
   success: boolean;
-  ast?: JavaAST;
+  cst?: JavaCST;
   error?: string;
   filename: string;
 }
@@ -29,14 +29,14 @@ export class JavaParser {
       console.log(`[JavaParser] File content length: ${sourceCode.length} characters`);
 
       // Parse the Java source code
-      const ast = javaParser.parse(sourceCode);
+      const cst = javaParser.parse(sourceCode);
 
       console.log(`[JavaParser] Parse successful for: ${filename}`);
-      console.log(`[JavaParser] AST keys: ${Object.keys(ast).join(', ')}`);
+      console.log(`[JavaParser] CST keys: ${Object.keys(cst).join(', ')}`);
 
       return {
         success: true,
-        ast: ast as JavaAST,
+        cst: cst as JavaCST,
         filename,
       };
     } catch (error) {
@@ -79,69 +79,6 @@ export class JavaParser {
     console.log(`[JavaParser] Parsing complete. Success: ${successCount}, Failures: ${failureCount}`);
 
     return results;
-  }
-
-  /**
-   * Log detailed AST information for debugging
-   */
-  static debugAST(ast: JavaAST, depth: number = 0): void {
-    const indent = '  '.repeat(depth);
-    const maxDepth = 3; // Limit depth to avoid console spam
-
-    if (depth > maxDepth) {
-      console.debug(`${indent}... (max depth reached)`);
-      return;
-    }
-
-    // Check if this is a node with a name property (common in java-parser)
-    const nodeName = ast.name?.escapedValue || ast.name?.image || 'unnamed';
-    console.debug(`${indent}Node: ${nodeName}`);
-
-    // Log important properties based on node structure
-    if (ast.packageDeclaration) {
-      console.debug(`${indent}Package: ${ast.packageDeclaration.name?.escapedValue || 'default'}`);
-    }
-
-    if (ast.imports) {
-      console.debug(`${indent}Imports: ${ast.imports.length || 0}`);
-    }
-
-    if (ast.types) {
-      console.debug(`${indent}Types: ${ast.types.length || 0}`);
-    }
-
-    if (ast.modifiers) {
-      const modifiers = Array.isArray(ast.modifiers) ? ast.modifiers.map((m: any) => m.keyword || m.image).join(', ') : ast.modifiers.keyword || ast.modifiers.image;
-      console.debug(`${indent}Modifiers: ${modifiers || 'none'}`);
-    }
-
-    if (ast.parameters) {
-      console.debug(`${indent}Parameters: ${ast.parameters.length || 0}`);
-    }
-
-    if (ast.arguments) {
-      console.debug(`${indent}Arguments: ${ast.arguments.length || 0}`);
-    }
-
-    // Recursively debug child nodes (limited depth)
-    if (depth < maxDepth) {
-      for (const [key, value] of Object.entries(ast)) {
-        if (key !== 'name' && value && typeof value === 'object') {
-          if (Array.isArray(value)) {
-            console.debug(`${indent}${key}: [${value.length} items]`);
-            value.forEach((item, index) => {
-              if (item && typeof item === 'object') {
-                console.debug(`${indent}  [${index}]`);
-                this.debugAST(item, depth + 2);
-              }
-            });
-          } else if (typeof value === 'object') {
-            console.debug(`${indent}${key}:`);
-            this.debugAST(value, depth + 1);
-          }
-        }
-      }
-    }
   }
 
   /**
