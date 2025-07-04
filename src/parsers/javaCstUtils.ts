@@ -359,14 +359,14 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                           if (calledMethodName) {
                             details.push(calledMethodName); // Add only the called method name
                           }
-                          console.log(`[CST] Found connection: ${className} -> ${targetComponentType} (${chain[0]})`);
+                          console.log(`[CST] Found connection: ${className} -> ${targetComponentType} (${calledMethodName})`);
                           console.log(`[CST] Chain: ${chain.join(' -> ')}`);
                           console.log(`[CST] Called method name: ${calledMethodName}`);
                           console.log(`[CST] Details array: ${JSON.stringify(details)}`);
                           connections.push({
                             source: className,
                             target: targetComponentType,
-                            label: chain[0], // Use the first method (forView, forEventSourcedEntity, etc.) as label
+                            label: calledMethodName || chain[0], // Use the actual method name, fallback to chain[0]
                             details: details,
                           });
                         }

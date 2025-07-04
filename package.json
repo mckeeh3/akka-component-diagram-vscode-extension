@@ -10,7 +10,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:akka-diagram-generator.scanProject"
+    "onCommand:akka-diagram-generator.scanProject",
+    "onCommand:akka-diagram-generator.generateCstDiagram"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -20,8 +21,16 @@
         "title": "Akka: Generate Component Diagram"
       },
       {
+        "command": "akka-diagram-generator.generateCstDiagram",
+        "title": "Akka: Generate CST Component Diagram"
+      },
+      {
         "command": "akka-diagram-generator.clearLayout",
         "title": "Akka: Clear Saved Diagram Layout"
+      },
+      {
+        "command": "akka-diagram-generator.clearCstLayout",
+        "title": "Akka: Clear Saved CST Diagram Layout"
       }
     ],
     "menus": {
@@ -29,6 +38,11 @@
         {
           "when": "resourceLangId == java || explorerResourceIsFolder",
           "command": "akka-diagram-generator.scanProject",
+          "group": "navigation"
+        },
+        {
+          "when": "resourceLangId == java || explorerResourceIsFolder",
+          "command": "akka-diagram-generator.generateCstDiagram",
           "group": "navigation"
         }
       ]

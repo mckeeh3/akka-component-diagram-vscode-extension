@@ -50,6 +50,14 @@ function initializeDiagram(data, viewState) {
   nodes = diagramData.nodes;
   edges = diagramData.edges;
 
+  // Debug: log the edges being initialized
+  console.log('Initializing diagram with edges:', edges);
+  edges.forEach((edge, index) => {
+    console.log(`Edge ${index}:`, edge);
+    console.log(`Edge ${index} details:`, edge.details);
+    console.log(`Edge ${index} details length:`, edge.details ? edge.details.length : 'undefined');
+  });
+
   scale = initialViewState.scale;
   panX = initialViewState.panX;
   panY = initialViewState.panY;
@@ -172,6 +180,7 @@ function drawEdges() {
           height: 20,
           edge: edge,
         });
+        console.log('Created hitbox for edge:', edge.source, '->', edge.target, 'at', midX - textWidth / 2, midY - 10, 'size:', textWidth, 'x', 20);
       }
     }
   });
@@ -403,19 +412,40 @@ function setupEventListeners() {
       const worldX = (e.clientX - panX) / scale;
       const worldY = (e.clientY - panY) / scale;
       let hoveredEdge = null;
+      console.log('Mouse position (world):', worldX, worldY);
+      console.log('Number of hitboxes:', edgeLabelHitboxes.length);
       for (const hitbox of edgeLabelHitboxes) {
+        console.log('Checking hitbox:', hitbox.x, hitbox.y, hitbox.width, hitbox.height);
         if (worldX >= hitbox.x && worldX <= hitbox.x + hitbox.width && worldY >= hitbox.y && worldY <= hitbox.y + hitbox.height) {
           hoveredEdge = hitbox.edge;
+          console.log('Hovering over edge:', hoveredEdge);
+          console.log('Edge details:', hoveredEdge.details);
+          console.log('Edge details length:', hoveredEdge.details ? hoveredEdge.details.length : 'undefined');
           break;
         }
       }
       if (hoveredEdge && hoveredEdge.details && hoveredEdge.details.length > 0) {
-        tooltip.innerHTML = '<ul>' + hoveredEdge.details.map((d) => '<li>' + d + '</li>').join('') + '</ul>';
+        // Show all details in the tooltip
+        const detailsList = hoveredEdge.details.map((d) => '<li>' + d + '</li>').join('');
+        tooltip.innerHTML = '<div><strong>Methods:</strong></div><ul style="margin: 4px 0; padding-left: 16px;">' + detailsList + '</ul>';
         tooltip.style.left = e.clientX + 15 + 'px';
         tooltip.style.top = e.clientY + 15 + 'px';
         tooltip.classList.remove('hidden');
+
+        // Debug: log the details being shown
+        console.log('Tooltip details:', hoveredEdge.details);
+        console.log('Tooltip HTML:', tooltip.innerHTML);
+        console.log('Tooltip element:', tooltip);
+        console.log('Tooltip visibility:', tooltip.classList.contains('hidden'));
+        console.log('Tooltip display style:', tooltip.style.display);
+        console.log('Tooltip position:', tooltip.style.left, tooltip.style.top);
       } else {
         tooltip.classList.add('hidden');
+        console.log('No details found for edge:', hoveredEdge);
+        if (hoveredEdge) {
+          console.log('Edge has no details property:', !hoveredEdge.details);
+          console.log('Edge details is empty array:', hoveredEdge.details && hoveredEdge.details.length === 0);
+        }
       }
     }
   });

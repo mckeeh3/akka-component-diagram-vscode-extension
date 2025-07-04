@@ -10,6 +10,7 @@ import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './m
 
 // Global variable to track the existing diagram panel
 let currentDiagramPanel: vscode.WebviewPanel | undefined;
+let currentCstDiagramPanel: vscode.WebviewPanel | undefined;
 
 // --- Extension Activation ---
 
@@ -392,7 +393,243 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable);
+  let generateCstDiagramDisposable = vscode.commands.registerCommand('akka-diagram-generator.generateCstDiagram', async (uri: vscode.Uri) => {
+    // Combined log function that outputs to both outputChannel and console
+    const log = (...args: any[]) => {
+      const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      outputChannel.appendLine(msg);
+      console.log(msg);
+    };
+
+    try {
+      log('[Extension] ========================================');
+      log('[Extension] COMMAND EXECUTED: akka-diagram-generator.generateCstDiagram');
+      log('[Extension] ========================================');
+      log('[Extension] Command "akka-diagram-generator.generateCstDiagram" executed');
+
+      let scanFolder: vscode.WorkspaceFolder | undefined;
+      let relativePath: string;
+
+      if (uri) {
+        log(`[Extension] URI provided: ${uri.fsPath}`);
+        scanFolder = vscode.workspace.getWorkspaceFolder(uri);
+        if (!scanFolder) {
+          vscode.window.showErrorMessage('Selected file is not part of a workspace folder.');
+          return;
+        }
+        relativePath = path.relative(scanFolder.uri.fsPath, uri.fsPath);
+      } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        scanFolder = vscode.workspace.workspaceFolders[0];
+        relativePath = '';
+        log(`[Extension] Using workspace folder: ${scanFolder.uri.fsPath}`);
+      } else {
+        vscode.window.showErrorMessage('No folder open in workspace.');
+        return;
+      }
+
+      const pattern = new vscode.RelativePattern(path.join(scanFolder.uri.fsPath, relativePath), '**/*.java');
+      log(`[Extension] Searching for Java files with pattern: ${pattern.pattern}`);
+
+      const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
+
+      if (javaFiles.length === 0) {
+        vscode.window.showWarningMessage('No Java files found in the selected folder.');
+        log('[Extension] No Java files found');
+        return;
+      }
+
+      vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s) for CST diagram...`);
+      log(`[Extension] Found ${javaFiles.length} Java files to scan for CST diagram`);
+
+      // --- Java Parser Step ---
+      log(`[Extension] ========================================`);
+      log(`[Extension] STARTING CST-ONLY DIAGRAM GENERATION`);
+      log(`[Extension] ========================================`);
+      log(`[Extension] Starting Java parser for ${javaFiles.length} files`);
+
+      const parseResults = await JavaParser.parseFiles(javaFiles);
+      log(`[Extension] Java parser completed, processing ${parseResults.length} results`);
+
+      // Count successes and failures
+      const successfulParses = parseResults.filter((r) => r.success);
+      const failedParses = parseResults.filter((r) => !r.success);
+
+      log(`[Extension] Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
+
+      // Show user feedback
+      if (failedParses.length > 0) {
+        failedParses.forEach((result) => {
+          vscode.window.showWarningMessage(`Failed to parse Java file: ${path.basename(result.filename)}`);
+          log(`[Extension] Parse failed: ${result.filename} - ${result.error}`);
+        });
+      }
+
+      vscode.window.showInformationMessage(`Java parser: ${successfulParses.length} files parsed successfully, ${failedParses.length} failures`);
+
+      // --- Extract Akka Components from CST ---
+      log(`[Extension] Starting Akka component extraction from CST...`);
+
+      const allAkkaComponents: Array<{
+        filename: string;
+        className: string;
+        componentType: string;
+        componentId: string;
+      }> = [];
+
+      for (const result of successfulParses) {
+        if (result.cst) {
+          const components = JavaParser.extractAkkaComponentsFromCST(result.cst, result.filename);
+          allAkkaComponents.push(...components);
+
+          log(`[Extension] File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
+
+          // Log each component for debugging
+          components.forEach((component, index) => {
+            log(`[Extension]   Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+          });
+        }
+      }
+
+      log(`[Extension] Found ${allAkkaComponents.length} Akka components across all files`);
+
+      if (allAkkaComponents.length > 0) {
+        allAkkaComponents.forEach((component, index) => {
+          log(`[Extension]   Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+        });
+      }
+
+      // --- CST-based Edge Detection ---
+      log(`[Extension] ========================================`);
+      log(`[Extension] STARTING CST-BASED EDGE DETECTION`);
+      log(`[Extension] ========================================`);
+      log(`[Extension] Starting CST-based edge detection...`);
+      const cstEdges: AkkaEdge[] = [];
+
+      for (const result of successfulParses) {
+        if (result.cst) {
+          log(`[Extension] Processing CST for file: ${path.basename(result.filename)}`);
+          // Get the source text for the file
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText);
+
+          if (connections.length > 0) {
+            log(`[Extension]   Found ${connections.length} connections in ${path.basename(result.filename)}:`);
+            connections.forEach((conn, index) => {
+              const edge: AkkaEdge = {
+                source: conn.source,
+                target: conn.target,
+                label: conn.label,
+                details: conn.details,
+              };
+              cstEdges.push(edge);
+              log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
+              if (conn.details && conn.details.length > 0) {
+                let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
+                log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
+                log(`[Extension]       Details: ${conn.details.join(', ')}`);
+                // Add specific logging for method names
+                if (conn.details.length > 0) {
+                  log(`[Extension]       Method names: ${conn.details.join(', ')}`);
+                }
+              }
+            });
+          } else {
+            log(`[Extension]   No connections found in ${path.basename(result.filename)}`);
+          }
+        }
+      }
+
+      log(`[Extension] CST-based edge detection complete. Found ${cstEdges.length} edges`);
+      if (cstEdges.length > 0) {
+        log(`[Extension] Found ${cstEdges.length} edges from CST-based detection:`);
+        cstEdges.forEach((edge, index) => {
+          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
+          log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          // Add specific logging for method names
+          if (edge.details && edge.details.length > 0) {
+            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+          }
+        });
+        log(`[Extension] CST-based edge detection ===== end edge lists. `);
+      } else {
+        log(`[Extension] No edges found from CST-based detection`);
+      }
+
+      // Convert CST components to AkkaComponent format
+      const cstNodes: AkkaComponent[] = allAkkaComponents.map((component) => ({
+        id: component.className,
+        name: component.componentId || component.className,
+        type: component.componentType,
+        uri: vscode.Uri.file(component.filename),
+      }));
+
+      // --- Load saved layouts from workspace state ---
+      const savedCstNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaCstDiagramLayout', {});
+      const savedCstViewState = context.workspaceState.get<ViewState>('akkaCstDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+
+      const cstNodesWithLayout = cstNodes.map((node) => ({
+        ...node,
+        ...savedCstNodeLayout[node.id], // Apply saved coordinates if they exist
+      }));
+
+      // Aggregate CST edges to consolidate multiple method calls between the same components
+      const aggregatedCstEdges = aggregateEdges(cstEdges);
+      log(`[Extension] CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
+
+      if (aggregatedCstEdges.length > 0) {
+        log(`[Extension] Aggregated CST edges:`);
+        aggregatedCstEdges.forEach((edge, index) => {
+          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
+          log(`[Extension]   Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          if (edge.details && edge.details.length > 0) {
+            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+          }
+        });
+      }
+
+      const cstDiagramData = { nodes: cstNodesWithLayout, edges: aggregatedCstEdges };
+
+      // --- Create the CST Webview Panel ---
+      if (cstDiagramData.nodes.length > 0) {
+        log(`[Extension] Creating CST diagram with ${cstDiagramData.nodes.length} nodes and ${cstDiagramData.edges.length} edges`);
+        createCstDiagramPanel(context, cstDiagramData, savedCstViewState);
+      } else {
+        vscode.window.showWarningMessage('No Akka components found in this project.');
+        log(`[Extension] No Akka components found in the project`);
+      }
+    } catch (error) {
+      console.error('[Extension] Error in command "akka-diagram-generator.generateCstDiagram"', error);
+      log(`[Extension] ERROR: ${error}`);
+      log(`[Extension] Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+      vscode.window.showErrorMessage('An error occurred while generating the CST diagram.');
+    }
+  });
+
+  let clearCstLayoutDisposable = vscode.commands.registerCommand('akka-diagram-generator.clearCstLayout', async () => {
+    const layout = context.workspaceState.get('akkaCstDiagramLayout', {});
+    const viewState = context.workspaceState.get('akkaCstDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+
+    if (Object.keys(layout).length === 0 && viewState.panX === 0 && viewState.panY === 0 && viewState.scale === 1) {
+      vscode.window.showInformationMessage('No saved CST diagram layout to clear.');
+      return;
+    }
+
+    const result = await vscode.window.showWarningMessage(
+      'Are you sure you want to clear the saved CST diagram layout? This will reset all custom node positions and view settings.',
+      { modal: true },
+      'Clear Layout',
+      'Cancel'
+    );
+
+    if (result === 'Clear Layout') {
+      context.workspaceState.update('akkaCstDiagramLayout', {});
+      context.workspaceState.update('akkaCstDiagramViewState', { panX: 0, panY: 0, scale: 1 });
+      vscode.window.showInformationMessage('CST diagram layout cleared successfully. The next time you generate a diagram, it will use default positioning.');
+    }
+  });
+
+  context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable, generateCstDiagramDisposable, clearCstLayoutDisposable);
 }
 
 // --- Webview Panel Creation ---
@@ -444,6 +681,86 @@ function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: Akk
           return;
         case 'saveViewState':
           context.workspaceState.update('akkaDiagramViewState', message.payload);
+          return;
+        case 'navigateTo':
+          const component = data.nodes.find((n) => n.id === message.payload.componentId);
+          if (component && component.uri.scheme !== 'untitled') {
+            const document = await vscode.workspace.openTextDocument(component.uri);
+            const editor = await vscode.window.showTextDocument(document);
+
+            const text = document.getText();
+            const regex = new RegExp(`class\\s+${component.id}`);
+            const match = text.match(regex);
+            if (match && typeof match.index === 'number') {
+              const pos = document.positionAt(match.index);
+              editor.selection = new vscode.Selection(pos, pos);
+              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+            }
+          }
+          return;
+      }
+    },
+    undefined,
+    context.subscriptions
+  );
+
+  const serializableData: SerializableDiagramData = {
+    nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
+    edges: data.edges,
+  };
+
+  panel.webview.html = getWebviewContent(serializableData, viewState, context.extensionUri);
+}
+
+// --- CST Diagram Panel Creation ---
+
+function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+  // Check if we already have an active CST diagram panel
+  if (currentCstDiagramPanel) {
+    // Update the existing panel with new data
+    const serializableData: SerializableDiagramData = {
+      nodes: data.nodes.map(({ id, name, type, x, y }) => ({ id, name, type, x, y })),
+      edges: data.edges,
+    };
+
+    // Send the new data to the existing webview
+    currentCstDiagramPanel.webview.postMessage({
+      command: 'updateDiagram',
+      payload: { data: serializableData, viewState },
+    });
+
+    // Reveal the existing panel
+    currentCstDiagramPanel.reveal();
+    return;
+  }
+
+  // Create a new panel if none exists
+  const panel = vscode.window.createWebviewPanel('akkaCstDiagram', 'Akka Component Diagram (CST)', vscode.ViewColumn.Two, {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+  });
+
+  // Store the panel reference
+  currentCstDiagramPanel = panel;
+
+  // Handle panel disposal
+  panel.onDidDispose(
+    () => {
+      currentCstDiagramPanel = undefined;
+    },
+    null,
+    context.subscriptions
+  );
+
+  panel.webview.onDidReceiveMessage(
+    async (message) => {
+      switch (message.command) {
+        case 'saveLayout':
+          const currentLayout = context.workspaceState.get('akkaCstDiagramLayout', {});
+          context.workspaceState.update('akkaCstDiagramLayout', { ...currentLayout, ...message.payload });
+          return;
+        case 'saveViewState':
+          context.workspaceState.update('akkaCstDiagramViewState', message.payload);
           return;
         case 'navigateTo':
           const component = data.nodes.find((n) => n.id === message.payload.componentId);
