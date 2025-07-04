@@ -166,21 +166,22 @@ function drawEdges() {
       ctx.restore();
 
       if (edge.label) {
-        const midX = (startX + endX) / 2;
-        const midY = (startY + endY) / 2 - 10;
+        // Position label at 1/3 distance from the target (arrow end)
+        const labelX = startX + (endX - startX) * (2 / 3);
+        const labelY = startY + (endY - startY) * (2 / 3) - 10;
         ctx.save();
         ctx.fillStyle = '#CBD5E0';
-        ctx.fillText(edge.label, midX, midY);
+        ctx.fillText(edge.label, labelX, labelY);
         ctx.restore();
         const textWidth = ctx.measureText(edge.label).width;
         edgeLabelHitboxes.push({
-          x: midX - textWidth / 2,
-          y: midY - 10,
+          x: labelX - textWidth / 2,
+          y: labelY - 10,
           width: textWidth,
           height: 20,
           edge: edge,
         });
-        console.log('Created hitbox for edge:', edge.source, '->', edge.target, 'at', midX - textWidth / 2, midY - 10, 'size:', textWidth, 'x', 20);
+        console.log('Created hitbox for edge:', edge.source, '->', edge.target, 'at', labelX - textWidth / 2, labelY - 10, 'size:', textWidth, 'x', 20);
       }
     }
   });
