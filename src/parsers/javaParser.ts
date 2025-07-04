@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as javaParser from 'java-parser';
+import { createPrefixedLogger } from '../utils/logger';
 
 // Type definitions for java-parser
 interface JavaCST {
@@ -17,22 +18,23 @@ export class JavaParser {
   /**
    * Parse a single Java source file
    */
-  static async parseFile(fileUri: vscode.Uri): Promise<ParseResult> {
+  static async parseFile(fileUri: vscode.Uri, outputChannel?: vscode.OutputChannel): Promise<ParseResult> {
+    const log = outputChannel ? createPrefixedLogger(outputChannel, '[JavaParser]') : console.log;
     const filename = fileUri.fsPath;
-    console.log(`[JavaParser] Starting to parse file: ${filename}`);
+    log(`Starting to parse file: ${filename}`);
 
     try {
       // Read the file content
       const document = await vscode.workspace.openTextDocument(fileUri);
       const sourceCode = document.getText();
 
-      console.log(`[JavaParser] File content length: ${sourceCode.length} characters`);
+      log(`File content length: ${sourceCode.length} characters`);
 
       // Parse the Java source code
       const cst = javaParser.parse(sourceCode);
 
-      console.log(`[JavaParser] Parse successful for: ${filename}`);
-      console.log(`[JavaParser] CST keys: ${Object.keys(cst).join(', ')}`);
+      log(`Parse successful for: ${filename}`);
+      log(`CST keys: ${Object.keys(cst).join(', ')}`);
 
       return {
         success: true,
@@ -41,7 +43,7 @@ export class JavaParser {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[JavaParser] Parse failed for ${filename}: ${errorMessage}`);
+      log(`Parse failed for ${filename}: ${errorMessage}`);
 
       return {
         success: false,
@@ -54,29 +56,30 @@ export class JavaParser {
   /**
    * Parse multiple Java source files
    */
-  static async parseFiles(files: vscode.Uri[]): Promise<ParseResult[]> {
-    console.log(`[JavaParser] Starting to parse ${files.length} Java files`);
+  static async parseFiles(files: vscode.Uri[], outputChannel?: vscode.OutputChannel): Promise<ParseResult[]> {
+    const log = outputChannel ? createPrefixedLogger(outputChannel, '[JavaParser]') : console.log;
+    log(`Starting to parse ${files.length} Java files`);
 
     const results: ParseResult[] = [];
     let successCount = 0;
     let failureCount = 0;
 
     for (const file of files) {
-      console.log(`[JavaParser] Processing file ${results.length + 1}/${files.length}: ${file.fsPath}`);
+      log(`Processing file ${results.length + 1}/${files.length}: ${file.fsPath}`);
 
-      const result = await this.parseFile(file);
+      const result = await this.parseFile(file, outputChannel);
       results.push(result);
 
       if (result.success) {
         successCount++;
-        console.log(`[JavaParser] ✓ Success: ${result.filename}`);
+        log(`✓ Success: ${result.filename}`);
       } else {
         failureCount++;
-        console.error(`[JavaParser] ✗ Failed: ${result.filename} - ${result.error}`);
+        log(`✗ Failed: ${result.filename} - ${result.error}`);
       }
     }
 
-    console.log(`[JavaParser] Parsing complete. Success: ${successCount}, Failures: ${failureCount}`);
+    log(`Parsing complete. Success: ${successCount}, Failures: ${failureCount}`);
 
     return results;
   }
@@ -189,6 +192,8 @@ export class JavaParser {
         }
       }
     } catch (error) {
+      // Note: This is a private method, so we'll use console.debug for now
+      // In a future refactor, we could pass the logger down to this method
       console.debug('[JavaParser] Error extracting string value:', error);
     }
     return null;

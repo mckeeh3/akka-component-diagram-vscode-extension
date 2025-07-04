@@ -5,6 +5,7 @@ import { JavaParser } from './parsers/javaParser';
 import { parseNodes, parseEdges, aggregateEdges } from './parsers/akkaParser';
 import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './parsers/javaCstUtils';
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
+import { createPrefixedLogger } from './utils/logger';
 
 // --- Type Definitions ---
 
@@ -15,34 +16,29 @@ let currentCstDiagramPanel: vscode.WebviewPanel | undefined;
 // --- Extension Activation ---
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('Congratulations, your extension "akka-diagram-generator" is now active!');
-  console.log('[Extension] Extension activation started');
-
   // Create output channel for debugging
   const outputChannel = vscode.window.createOutputChannel('Akka Diagram Generator');
-  outputChannel.appendLine('[Extension] Akka Diagram Generator extension activated');
-  outputChannel.appendLine('[Extension] Extension activation started');
+  const log = createPrefixedLogger(outputChannel, '[Extension]');
+
+  log('Congratulations, your extension "akka-diagram-generator" is now active!');
+  log('Extension activation started');
   outputChannel.show(); // Make the output channel visible
 
   let scanProjectDisposable = vscode.commands.registerCommand('akka-diagram-generator.scanProject', async (uri: vscode.Uri) => {
-    // Combined log function that outputs to both outputChannel and console
-    const log = (...args: any[]) => {
-      const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      outputChannel.appendLine(msg);
-      console.log(msg);
-    };
+    // Use the shared logger
+    const log = createPrefixedLogger(outputChannel, '[Extension]');
 
     try {
-      log('[Extension] ========================================');
-      log('[Extension] COMMAND EXECUTED: akka-diagram-generator.scanProject');
-      log('[Extension] ========================================');
-      log('[Extension] Command "akka-diagram-generator.scanProject" executed');
+      log('========================================');
+      log('COMMAND EXECUTED: akka-diagram-generator.scanProject');
+      log('========================================');
+      log('Command "akka-diagram-generator.scanProject" executed');
 
       let scanFolder: vscode.WorkspaceFolder | undefined;
       let relativePath: string;
 
       if (uri) {
-        log(`[Extension] URI provided: ${uri.fsPath}`);
+        log(`URI provided: ${uri.fsPath}`);
         scanFolder = vscode.workspace.getWorkspaceFolder(uri);
         if (!scanFolder) {
           vscode.window.showErrorMessage('Selected file is not part of a workspace folder.');
@@ -52,46 +48,46 @@ export function activate(context: vscode.ExtensionContext) {
       } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
         scanFolder = vscode.workspace.workspaceFolders[0];
         relativePath = '';
-        log(`[Extension] Using workspace folder: ${scanFolder.uri.fsPath}`);
+        log(`Using workspace folder: ${scanFolder.uri.fsPath}`);
       } else {
         vscode.window.showErrorMessage('No folder open in workspace.');
         return;
       }
 
       const pattern = new vscode.RelativePattern(path.join(scanFolder.uri.fsPath, relativePath), '**/*.java');
-      log(`[Extension] Searching for Java files with pattern: ${pattern.pattern}`);
+      log(`Searching for Java files with pattern: ${pattern.pattern}`);
 
       const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
 
       if (javaFiles.length === 0) {
         vscode.window.showWarningMessage('No Java files found in the selected folder.');
-        log('[Extension] No Java files found');
+        log('No Java files found');
         return;
       }
 
       vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s)...`);
-      log(`[Extension] Found ${javaFiles.length} Java files to scan`);
+      log(`Found ${javaFiles.length} Java files to scan`);
 
       // --- Java Parser Step ---
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING JAVA PARSER STEP`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting Java parser for ${javaFiles.length} files`);
+      log(`========================================`);
+      log(`STARTING JAVA PARSER STEP`);
+      log(`========================================`);
+      log(`Starting Java parser for ${javaFiles.length} files`);
 
-      const parseResults = await JavaParser.parseFiles(javaFiles);
-      log(`[Extension] Java parser completed, processing ${parseResults.length} results`);
+      const parseResults = await JavaParser.parseFiles(javaFiles, outputChannel);
+      log(`Java parser completed, processing ${parseResults.length} results`);
 
       // Count successes and failures
       const successfulParses = parseResults.filter((r) => r.success);
       const failedParses = parseResults.filter((r) => !r.success);
 
-      log(`[Extension] Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
+      log(`Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
 
       // Show user feedback
       if (failedParses.length > 0) {
         failedParses.forEach((result) => {
           vscode.window.showWarningMessage(`Failed to parse Java file: ${path.basename(result.filename)}`);
-          log(`[Extension] Parse failed: ${result.filename} - ${result.error}`);
+          log(`Parse failed: ${result.filename} - ${result.error}`);
         });
       }
 
@@ -99,14 +95,14 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Debug: Log CST structure for first successful parse
       if (successfulParses.length > 0) {
-        log(`[Extension] Debugging CST structure for: ${successfulParses[0].filename}`);
+        log(`Debugging CST structure for: ${successfulParses[0].filename}`);
       }
 
       // --- Extract Annotations from CST ---
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING ANNOTATION EXTRACTION`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting annotation extraction from CST...`);
+      log(`========================================`);
+      log(`STARTING ANNOTATION EXTRACTION`);
+      log(`========================================`);
+      log(`Starting annotation extraction from CST...`);
 
       const allAnnotations: Array<{
         filename: string;
@@ -121,7 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
             annotations,
           });
 
-          log(`[Extension] File ${path.basename(result.filename)}: Found ${annotations.length} annotations`);
+          log(`File ${path.basename(result.filename)}: Found ${annotations.length} annotations`);
 
           // Get the source text for this file
           const document = await vscode.workspace.openTextDocument(result.filename);
@@ -131,16 +127,16 @@ export function activate(context: vscode.ExtensionContext) {
           annotations.forEach((annotation, index) => {
             const locationInfo = annotation.location ? `line ${annotation.location.startLine}, col ${annotation.location.startColumn}` : 'unknown location';
 
-            log(`[Extension]   Annotation ${index + 1}: ${annotation.name} at ${locationInfo}`);
+            log(`  Annotation ${index + 1}: ${annotation.name} at ${locationInfo}`);
 
             // Log the actual source code for the annotation
             if (annotation.location && sourceText) {
               const annotationSourceCode = extractSourceAtLocation(sourceText, annotation.location);
-              log(`[Extension]     Source code: "${annotationSourceCode}"`);
+              log(`    Source code: "${annotationSourceCode}"`);
             }
 
             if (annotation.arguments && annotation.arguments.length > 0) {
-              log(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+              log(`    Arguments: ${annotation.arguments.join(', ')}`);
             }
           });
         }
@@ -150,19 +146,19 @@ export function activate(context: vscode.ExtensionContext) {
       const akkaAnnotations = ['ComponentId', 'HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
       const foundAkkaAnnotations = allAnnotations.flatMap((fileResult) => fileResult.annotations.filter((ann) => akkaAnnotations.includes(ann.name)));
 
-      log(`[Extension] Found ${foundAkkaAnnotations.length} Akka-specific annotations across all files`);
+      log(`Found ${foundAkkaAnnotations.length} Akka-specific annotations across all files`);
 
       if (foundAkkaAnnotations.length > 0) {
         foundAkkaAnnotations.forEach((annotation, index) => {
-          log(`[Extension]   Akka annotation ${index + 1}: ${annotation.name}`);
+          log(`  Akka annotation ${index + 1}: ${annotation.name}`);
           if (annotation.arguments && annotation.arguments.length > 0) {
-            log(`[Extension]     Arguments: ${annotation.arguments.join(', ')}`);
+            log(`    Arguments: ${annotation.arguments.join(', ')}`);
           }
         });
       }
 
       // --- Extract Akka Components from CST ---
-      log(`[Extension] Starting Akka component extraction from CST...`);
+      log(`Starting Akka component extraction from CST...`);
 
       const allAkkaComponents: Array<{
         filename: string;
@@ -176,66 +172,66 @@ export function activate(context: vscode.ExtensionContext) {
           const components = JavaParser.extractAkkaComponentsFromCST(result.cst, result.filename);
           allAkkaComponents.push(...components);
 
-          log(`[Extension] File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
+          log(`File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
 
           // Log each component for debugging
           components.forEach((component, index) => {
-            log(`[Extension]   Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+            log(`  Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
           });
         }
       }
 
-      log(`[Extension] Found ${allAkkaComponents.length} Akka components across all files`);
+      log(`Found ${allAkkaComponents.length} Akka components across all files`);
 
       if (allAkkaComponents.length > 0) {
         allAkkaComponents.forEach((component, index) => {
-          log(`[Extension]   Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+          log(`  Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
         });
       }
 
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING REGEX-BASED EDGE DETECTION`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting regex-based component detection...`);
+      log(`========================================`);
+      log(`STARTING REGEX-BASED EDGE DETECTION`);
+      log(`========================================`);
+      log(`Starting regex-based component detection...`);
       const parsedNodes = await parseNodes(javaFiles, outputChannel);
       const foundEdges = await parseEdges(parsedNodes, outputChannel);
 
       const aggregatedEdges = aggregateEdges(foundEdges);
 
-      log(`[Extension] Regex parsing complete. Found ${parsedNodes.size} components and ${aggregatedEdges.length} edges`);
+      log(`Regex parsing complete. Found ${parsedNodes.size} components and ${aggregatedEdges.length} edges`);
 
       // Log all found edges from regex parsing
       if (aggregatedEdges.length > 0) {
-        log(`[RegEx] Found ${aggregatedEdges.length} edges from regex parsing:`);
+        log(`Found ${aggregatedEdges.length} edges from regex parsing:`);
         aggregatedEdges.forEach((edge, index) => {
-          log(`[RegEx]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`[RegEx]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
-            log(`[RegEx]     Details: ${edge.details.join(', ')}`);
+            log(`    Details: ${edge.details.join(', ')}`);
           }
         });
       } else {
-        log(`[RegEx] No edges found from regex parsing`);
+        log(`No edges found from regex parsing`);
       }
 
       // --- CST-based Edge Detection ---
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING CST-BASED EDGE DETECTION`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting CST-based edge detection...`);
+      log(`========================================`);
+      log(`STARTING CST-BASED EDGE DETECTION`);
+      log(`========================================`);
+      log(`Starting CST-based edge detection...`);
       const cstEdges: AkkaEdge[] = [];
 
       for (const result of successfulParses) {
         if (result.cst) {
-          log(`[Extension] Processing CST for file: ${path.basename(result.filename)}`);
+          log(`Processing CST for file: ${path.basename(result.filename)}`);
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText);
+          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
-            log(`[Extension]   Found ${connections.length} connections in ${path.basename(result.filename)}:`);
+            log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
             connections.forEach((conn, index) => {
               const edge: AkkaEdge = {
                 source: conn.source,
@@ -244,43 +240,43 @@ export function activate(context: vscode.ExtensionContext) {
                 details: conn.details,
               };
               cstEdges.push(edge);
-              log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
+              log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
               if (conn.details && conn.details.length > 0) {
                 let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
-                log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
-                log(`[Extension]       Details: ${conn.details.join(', ')}`);
+                log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
+                log(`      Details: ${conn.details.join(', ')}`);
                 // Add specific logging for method names
                 if (conn.details.length > 0) {
-                  log(`[Extension]       Method names: ${conn.details.join(', ')}`);
+                  log(`      Method names: ${conn.details.join(', ')}`);
                 }
               }
             });
           } else {
-            log(`[Extension]   No connections found in ${path.basename(result.filename)}`);
+            log(`  No connections found in ${path.basename(result.filename)}`);
           }
         }
       }
 
-      log(`[Extension] CST-based edge detection complete. Found ${cstEdges.length} edges`);
+      log(`CST-based edge detection complete. Found ${cstEdges.length} edges`);
       if (cstEdges.length > 0) {
-        log(`[Extension] Found ${cstEdges.length} edges from CST-based detection:`);
+        log(`Found ${cstEdges.length} edges from CST-based detection:`);
         cstEdges.forEach((edge, index) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           // Add specific logging for method names
           if (edge.details && edge.details.length > 0) {
-            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            log(`    Method names: ${edge.details.join(', ')}`);
           }
         });
-        log(`[Extension] CST-based edge detection ===== end edge lists. `);
+        log(`CST-based edge detection ===== end edge lists. `);
       } else {
-        log(`[Extension] No edges found from CST-based detection`);
+        log(`No edges found from CST-based detection`);
       }
 
       // Combine edges from both methods with deduplication to prevent overlap
-      log(`[Extension] ========================================`);
-      log(`[Extension] COMBINING EDGES WITH DEDUPLICATION`);
-      log(`[Extension] ========================================`);
+      log(`========================================`);
+      log(`COMBINING EDGES WITH DEDUPLICATION`);
+      log(`========================================`);
 
       // Create a Set to track unique edges and prevent overlap
       const uniqueEdges = new Map<string, AkkaEdge>();
@@ -291,56 +287,56 @@ export function activate(context: vscode.ExtensionContext) {
       };
 
       // Add regex edges first
-      log(`[Extension] Adding ${aggregatedEdges.length} regex edges to unique set`);
+      log(`Adding ${aggregatedEdges.length} regex edges to unique set`);
       aggregatedEdges.forEach((edge, index) => {
         const key = createEdgeKey(edge);
         if (!uniqueEdges.has(key)) {
           uniqueEdges.set(key, edge);
-          log(`[Extension]   Added regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          log(`  Added regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
         } else {
-          log(`[Extension]   Skipped duplicate regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          log(`  Skipped duplicate regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
         }
       });
 
       // Add CST edges, but skip if already present from regex
-      log(`[Extension] Adding ${cstEdges.length} CST edges to unique set (skipping duplicates)`);
+      log(`Adding ${cstEdges.length} CST edges to unique set (skipping duplicates)`);
       cstEdges.forEach((edge, index) => {
         const key = createEdgeKey(edge);
         if (!uniqueEdges.has(key)) {
           uniqueEdges.set(key, edge);
-          log(`[Extension]   Added CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          log(`  Added CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
           if (edge.details && edge.details.length > 0) {
-            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            log(`    Method names: ${edge.details.join(', ')}`);
           }
         } else {
-          log(`[Extension]   Skipped duplicate CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label}) - already found by regex`);
+          log(`  Skipped duplicate CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label}) - already found by regex`);
         }
       });
 
       const allEdges = Array.from(uniqueEdges.values());
-      log(`[Extension] Deduplication complete. Final unique edges: ${allEdges.length} (${aggregatedEdges.length} from regex + ${cstEdges.length} from CST, with duplicates removed)`);
+      log(`Deduplication complete. Final unique edges: ${allEdges.length} (${aggregatedEdges.length} from regex + ${cstEdges.length} from CST, with duplicates removed)`);
 
       // Log all final unique edges
       if (allEdges.length > 0) {
-        log(`[Extension] Final unique edges found:`);
-        log(`[Extension] Final unique edges found (${allEdges.length}):`);
+        log(`Final unique edges found:`);
+        log(`Final unique edges found (${allEdges.length}):`);
         allEdges.forEach((edge, index) => {
-          log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
-            log(`[Extension]     Details: ${edge.details.join(', ')}`);
+            log(`    Details: ${edge.details.join(', ')}`);
             // Add specific logging for method names
             if (edge.details.length > 0) {
-              log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+              log(`    Method names: ${edge.details.join(', ')}`);
             }
           }
         });
-        log(`[Extension] Final unique edges ===== end edge lists. `);
-        log(`[Extension] Final unique edges ===== end edge lists. `);
+        log(`Final unique edges ===== end edge lists. `);
+        log(`Final unique edges ===== end edge lists. `);
       } else {
-        log(`[Extension] No edges found in the project`);
-        log(`[Extension] No edges found in the project`);
+        log(`No edges found in the project`);
+        log(`No edges found in the project`);
       }
 
       // --- Load saved layouts from workspace state ---
@@ -356,16 +352,16 @@ export function activate(context: vscode.ExtensionContext) {
 
       // --- Create the Webview Panel ---
       if (diagramData.nodes.length > 0) {
-        log(`[Extension] Creating diagram with ${diagramData.nodes.length} nodes and ${diagramData.edges.length} edges`);
+        log(`Creating diagram with ${diagramData.nodes.length} nodes and ${diagramData.edges.length} edges`);
         createDiagramPanel(context, diagramData, savedViewState);
       } else {
         vscode.window.showWarningMessage('No Akka components found in this project.');
-        log(`[Extension] No Akka components found in the project`);
+        log(`No Akka components found in the project`);
       }
     } catch (error) {
       console.error('[Extension] Error in command "akka-diagram-generator.scanProject"', error);
-      log(`[Extension] ERROR: ${error}`);
-      log(`[Extension] Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+      log(`ERROR: ${error}`);
+      log(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
       vscode.window.showErrorMessage('An error occurred while scanning the project.');
     }
   });
@@ -394,24 +390,20 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   let generateCstDiagramDisposable = vscode.commands.registerCommand('akka-diagram-generator.generateCstDiagram', async (uri: vscode.Uri) => {
-    // Combined log function that outputs to both outputChannel and console
-    const log = (...args: any[]) => {
-      const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-      outputChannel.appendLine(msg);
-      console.log(msg);
-    };
+    // Use the shared logger
+    const log = createPrefixedLogger(outputChannel, '[Extension]');
 
     try {
-      log('[Extension] ========================================');
-      log('[Extension] COMMAND EXECUTED: akka-diagram-generator.generateCstDiagram');
-      log('[Extension] ========================================');
-      log('[Extension] Command "akka-diagram-generator.generateCstDiagram" executed');
+      log('========================================');
+      log('COMMAND EXECUTED: akka-diagram-generator.generateCstDiagram');
+      log('========================================');
+      log('Command "akka-diagram-generator.generateCstDiagram" executed');
 
       let scanFolder: vscode.WorkspaceFolder | undefined;
       let relativePath: string;
 
       if (uri) {
-        log(`[Extension] URI provided: ${uri.fsPath}`);
+        log(`URI provided: ${uri.fsPath}`);
         scanFolder = vscode.workspace.getWorkspaceFolder(uri);
         if (!scanFolder) {
           vscode.window.showErrorMessage('Selected file is not part of a workspace folder.');
@@ -421,53 +413,53 @@ export function activate(context: vscode.ExtensionContext) {
       } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
         scanFolder = vscode.workspace.workspaceFolders[0];
         relativePath = '';
-        log(`[Extension] Using workspace folder: ${scanFolder.uri.fsPath}`);
+        log(`Using workspace folder: ${scanFolder.uri.fsPath}`);
       } else {
         vscode.window.showErrorMessage('No folder open in workspace.');
         return;
       }
 
       const pattern = new vscode.RelativePattern(path.join(scanFolder.uri.fsPath, relativePath), '**/*.java');
-      log(`[Extension] Searching for Java files with pattern: ${pattern.pattern}`);
+      log(`Searching for Java files with pattern: ${pattern.pattern}`);
 
       const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
 
       if (javaFiles.length === 0) {
         vscode.window.showWarningMessage('No Java files found in the selected folder.');
-        log('[Extension] No Java files found');
+        log('No Java files found');
         return;
       }
 
       vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s) for CST diagram...`);
-      log(`[Extension] Found ${javaFiles.length} Java files to scan for CST diagram`);
+      log(`Found ${javaFiles.length} Java files to scan for CST diagram`);
 
       // --- Java Parser Step ---
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING CST-ONLY DIAGRAM GENERATION`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting Java parser for ${javaFiles.length} files`);
+      log(`========================================`);
+      log(`STARTING CST-ONLY DIAGRAM GENERATION`);
+      log(`========================================`);
+      log(`Starting Java parser for ${javaFiles.length} files`);
 
-      const parseResults = await JavaParser.parseFiles(javaFiles);
-      log(`[Extension] Java parser completed, processing ${parseResults.length} results`);
+      const parseResults = await JavaParser.parseFiles(javaFiles, outputChannel);
+      log(`Java parser completed, processing ${parseResults.length} results`);
 
       // Count successes and failures
       const successfulParses = parseResults.filter((r) => r.success);
       const failedParses = parseResults.filter((r) => !r.success);
 
-      log(`[Extension] Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
+      log(`Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
 
       // Show user feedback
       if (failedParses.length > 0) {
         failedParses.forEach((result) => {
           vscode.window.showWarningMessage(`Failed to parse Java file: ${path.basename(result.filename)}`);
-          log(`[Extension] Parse failed: ${result.filename} - ${result.error}`);
+          log(`Parse failed: ${result.filename} - ${result.error}`);
         });
       }
 
       vscode.window.showInformationMessage(`Java parser: ${successfulParses.length} files parsed successfully, ${failedParses.length} failures`);
 
       // --- Extract Akka Components from CST ---
-      log(`[Extension] Starting Akka component extraction from CST...`);
+      log(`Starting Akka component extraction from CST...`);
 
       const allAkkaComponents: Array<{
         filename: string;
@@ -481,40 +473,40 @@ export function activate(context: vscode.ExtensionContext) {
           const components = JavaParser.extractAkkaComponentsFromCST(result.cst, result.filename);
           allAkkaComponents.push(...components);
 
-          log(`[Extension] File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
+          log(`File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
 
           // Log each component for debugging
           components.forEach((component, index) => {
-            log(`[Extension]   Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+            log(`  Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
           });
         }
       }
 
-      log(`[Extension] Found ${allAkkaComponents.length} Akka components across all files`);
+      log(`Found ${allAkkaComponents.length} Akka components across all files`);
 
       if (allAkkaComponents.length > 0) {
         allAkkaComponents.forEach((component, index) => {
-          log(`[Extension]   Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
+          log(`  Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
         });
       }
 
       // --- CST-based Edge Detection ---
-      log(`[Extension] ========================================`);
-      log(`[Extension] STARTING CST-BASED EDGE DETECTION`);
-      log(`[Extension] ========================================`);
-      log(`[Extension] Starting CST-based edge detection...`);
+      log(`========================================`);
+      log(`STARTING CST-BASED EDGE DETECTION`);
+      log(`========================================`);
+      log(`Starting CST-based edge detection...`);
       const cstEdges: AkkaEdge[] = [];
 
       for (const result of successfulParses) {
         if (result.cst) {
-          log(`[Extension] Processing CST for file: ${path.basename(result.filename)}`);
+          log(`Processing CST for file: ${path.basename(result.filename)}`);
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText);
+          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
-            log(`[Extension]   Found ${connections.length} connections in ${path.basename(result.filename)}:`);
+            log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
             connections.forEach((conn, index) => {
               const edge: AkkaEdge = {
                 source: conn.source,
@@ -523,37 +515,37 @@ export function activate(context: vscode.ExtensionContext) {
                 details: conn.details,
               };
               cstEdges.push(edge);
-              log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
+              log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
               if (conn.details && conn.details.length > 0) {
                 let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
-                log(`[Extension]     Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
-                log(`[Extension]       Details: ${conn.details.join(', ')}`);
+                log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
+                log(`      Details: ${conn.details.join(', ')}`);
                 // Add specific logging for method names
                 if (conn.details.length > 0) {
-                  log(`[Extension]       Method names: ${conn.details.join(', ')}`);
+                  log(`      Method names: ${conn.details.join(', ')}`);
                 }
               }
             });
           } else {
-            log(`[Extension]   No connections found in ${path.basename(result.filename)}`);
+            log(`  No connections found in ${path.basename(result.filename)}`);
           }
         }
       }
 
-      log(`[Extension] CST-based edge detection complete. Found ${cstEdges.length} edges`);
+      log(`CST-based edge detection complete. Found ${cstEdges.length} edges`);
       if (cstEdges.length > 0) {
-        log(`[Extension] Found ${cstEdges.length} edges from CST-based detection:`);
+        log(`Found ${cstEdges.length} edges from CST-based detection:`);
         cstEdges.forEach((edge, index) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`[Extension]   Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           // Add specific logging for method names
           if (edge.details && edge.details.length > 0) {
-            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            log(`    Method names: ${edge.details.join(', ')}`);
           }
         });
-        log(`[Extension] CST-based edge detection ===== end edge lists. `);
+        log(`CST-based edge detection ===== end edge lists. `);
       } else {
-        log(`[Extension] No edges found from CST-based detection`);
+        log(`No edges found from CST-based detection`);
       }
 
       // Convert CST components to AkkaComponent format
@@ -575,15 +567,15 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Aggregate CST edges to consolidate multiple method calls between the same components
       const aggregatedCstEdges = aggregateEdges(cstEdges);
-      log(`[Extension] CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
+      log(`CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
 
       if (aggregatedCstEdges.length > 0) {
-        log(`[Extension] Aggregated CST edges:`);
+        log(`Aggregated CST edges:`);
         aggregatedCstEdges.forEach((edge, index) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`[Extension]   Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
+          log(`  Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
-            log(`[Extension]     Method names: ${edge.details.join(', ')}`);
+            log(`    Method names: ${edge.details.join(', ')}`);
           }
         });
       }
@@ -592,16 +584,16 @@ export function activate(context: vscode.ExtensionContext) {
 
       // --- Create the CST Webview Panel ---
       if (cstDiagramData.nodes.length > 0) {
-        log(`[Extension] Creating CST diagram with ${cstDiagramData.nodes.length} nodes and ${cstDiagramData.edges.length} edges`);
+        log(`Creating CST diagram with ${cstDiagramData.nodes.length} nodes and ${cstDiagramData.edges.length} edges`);
         createCstDiagramPanel(context, cstDiagramData, savedCstViewState);
       } else {
         vscode.window.showWarningMessage('No Akka components found in this project.');
-        log(`[Extension] No Akka components found in the project`);
+        log(`No Akka components found in the project`);
       }
     } catch (error) {
       console.error('[Extension] Error in command "akka-diagram-generator.generateCstDiagram"', error);
-      log(`[Extension] ERROR: ${error}`);
-      log(`[Extension] Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+      log(`ERROR: ${error}`);
+      log(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
       vscode.window.showErrorMessage('An error occurred while generating the CST diagram.');
     }
   });
@@ -735,7 +727,7 @@ function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: 
   }
 
   // Create a new panel if none exists
-  const panel = vscode.window.createWebviewPanel('akkaCstDiagram', 'Akka Component Diagram (CST)', vscode.ViewColumn.Two, {
+  const panel = vscode.window.createWebviewPanel('akkaCstDiagram', 'Akka Component Diagram (CST)', vscode.ViewColumn.One, {
     enableScripts: true,
     retainContextWhenHidden: true,
   });

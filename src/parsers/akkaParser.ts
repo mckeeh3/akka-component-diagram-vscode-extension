@@ -1,12 +1,10 @@
 import * as vscode from 'vscode';
 import { AkkaComponent, AkkaEdge } from '../models/types';
 import * as path from 'path';
+import { createPrefixedLogger } from '../utils/logger';
 
-export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLine: (msg: string) => void }): Promise<Map<string, AkkaComponent>> {
-  const log = (msg: string) => {
-    console.log(msg);
-    if (outputChannel) outputChannel.appendLine(msg);
-  };
+export async function parseNodes(files: vscode.Uri[], outputChannel?: vscode.OutputChannel): Promise<Map<string, AkkaComponent>> {
+  const log = outputChannel ? createPrefixedLogger(outputChannel, '[RegEx]') : console.log;
   log(`[RegEx] Starting to parse ${files.length} files for components`);
   const parsedNodes = new Map<string, AkkaComponent>();
 
@@ -41,11 +39,8 @@ export async function parseNodes(files: vscode.Uri[], outputChannel?: { appendLi
   return parsedNodes;
 }
 
-export async function parseEdges(nodes: Map<string, AkkaComponent>, outputChannel?: { appendLine: (msg: string) => void }): Promise<AkkaEdge[]> {
-  const log = (msg: string) => {
-    console.log(msg);
-    if (outputChannel) outputChannel.appendLine(msg);
-  };
+export async function parseEdges(nodes: Map<string, AkkaComponent>, outputChannel?: vscode.OutputChannel): Promise<AkkaEdge[]> {
+  const log = outputChannel ? createPrefixedLogger(outputChannel, '[RegEx]') : console.log;
   log(`[RegEx] Starting to parse edges for ${nodes.size} nodes`);
   const foundEdges: AkkaEdge[] = [];
   for (const sourceNode of nodes.values()) {

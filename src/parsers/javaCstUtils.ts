@@ -1,5 +1,7 @@
 import { parse } from 'java-parser';
 import { AkkaComponent, AkkaEdge } from '../models/types';
+import * as vscode from 'vscode';
+import { createPrefixedLogger } from '../utils/logger';
 
 /**
  * Utility function to extract Java source code from a CST node location
@@ -32,9 +34,12 @@ export function extractSourceAtLocation(sourceText: string, location: { startOff
  * @param cst The CST root
  * @param filename The filename (for debugging)
  * @param sourceText The source text (for extracting method parameters)
+ * @param outputChannel Optional VS Code output channel for logging
  * @returns Array of connections: { sourceClass, targetType, targetClass, methodName, location }
  */
-export function extractComponentConnectionsFromCST(cst: any, filename: string, sourceText?: string) {
+export function extractComponentConnectionsFromCST(cst: any, filename: string, sourceText?: string, outputChannel?: vscode.OutputChannel) {
+  const log = outputChannel ? createPrefixedLogger(outputChannel, '[CSTUtils]') : console.log;
+
   const connections: Array<{
     source: string;
     target: string;
@@ -302,14 +307,14 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                       }
 
                       // Look for for* -> method -> invoke pattern
-                      console.log(`[CST] Checking chain: ${chain.join(' -> ')}`);
+                      log(`Checking chain: ${chain.join(' -> ')}`);
                       if (
                         chain.length >= 3 &&
                         (chain[0].startsWith('for') || chain[0] === 'forView' || chain[0] === 'forEventSourcedEntity') &&
                         chain[1] === 'method' &&
                         (chain[2] === 'invoke' || chain[2] === 'invokeAsync')
                       ) {
-                        console.log(`[CST] Found valid chain pattern: ${chain.join(' -> ')}`);
+                        log(`Found valid chain pattern: ${chain.join(' -> ')}`);
                         // Extract target component type and method name from the method reference argument
                         let targetComponentType = '';
                         let calledMethodName = '';
@@ -322,31 +327,31 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
 
                               // Use the location offsets to extract the method parameter directly from source text
                               if (methodInv.location && methodInv.location.startOffset !== undefined && methodInv.location.endOffset !== undefined) {
-                                console.log(`[CST] Method invocation location: ${methodInv.location.startOffset} to ${methodInv.location.endOffset}`);
+                                log(`Method invocation location: ${methodInv.location.startOffset} to ${methodInv.location.endOffset}`);
 
                                 // Extract the method parameter text directly from source
                                 if (sourceText) {
                                   const methodParamText = extractSourceAtLocation(sourceText, methodInv.location);
-                                  console.log(`[CST] Method parameter text: "${methodParamText}"`);
+                                  log(`Method parameter text: "${methodParamText}"`);
 
                                   // Remove parentheses from the extracted text
                                   const cleanParamText = methodParamText.replace(/^\(|\)$/g, '');
-                                  console.log(`[CST] Clean parameter text: "${cleanParamText}"`);
+                                  log(`Clean parameter text: "${cleanParamText}"`);
 
                                   // Parse the ClassName::methodName format
                                   const parts = cleanParamText.split('::');
                                   if (parts.length === 2) {
                                     targetComponentType = parts[0];
                                     calledMethodName = parts[1];
-                                    console.log(`[CST] Extracted from text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
+                                    log(`Extracted from text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
                                   } else {
-                                    console.log(`[CST] Could not parse method parameter: "${cleanParamText}"`);
+                                    log(`Could not parse method parameter: "${cleanParamText}"`);
                                   }
                                 } else {
-                                  console.log(`[CST] No source text provided, cannot extract method name`);
+                                  log(`No source text provided, cannot extract method name`);
                                 }
                               } else {
-                                console.log(`[CST] No location information available for method invocation`);
+                                log(`No location information available for method invocation`);
                               }
                             }
                           }
@@ -359,10 +364,10 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                           if (calledMethodName) {
                             details.push(calledMethodName); // Add only the called method name
                           }
-                          console.log(`[CST] Found connection: ${className} -> ${targetComponentType} (${calledMethodName})`);
-                          console.log(`[CST] Chain: ${chain.join(' -> ')}`);
-                          console.log(`[CST] Called method name: ${calledMethodName}`);
-                          console.log(`[CST] Details array: ${JSON.stringify(details)}`);
+                          log(`Found connection: ${className} -> ${targetComponentType} (${calledMethodName})`);
+                          log(`Chain: ${chain.join(' -> ')}`);
+                          log(`Called method name: ${calledMethodName}`);
+                          log(`Details array: ${JSON.stringify(details)}`);
                           connections.push({
                             source: className,
                             target: targetComponentType,
@@ -435,26 +440,40 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     for (const { annotation, className } of annotations) {
       // Use the annotation location to extract the full annotation text
       if (annotation.location && annotation.location.startOffset !== undefined && annotation.location.endOffset !== undefined) {
-        console.log(`[CST] Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
+        log(`Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
 
         if (sourceText) {
           const annotationText = extractSourceAtLocation(sourceText, annotation.location);
-          console.log(`[CST] Annotation text: "${annotationText}"`);
+          log(`Annotation text: "${annotationText}"`);
 
           // Check if this is a @Consume annotation and parse it
           if (annotationText.startsWith('@Consume')) {
-            console.log(`[CST] Found @Consume annotation in class: ${className}`);
+            log(`Found @Consume annotation in class: ${className}`);
 
-            // Parse the @Consume.FromType(ClassName.class) format
+            // Parse both @Consume.FromType(ClassName.class) and @Consume.FromType(value = ClassName.class) formats
             const consumeMatch = annotationText.match(/@Consume\.From(\w+)\(([^)]+)\)/);
             if (consumeMatch) {
               const consumeType = consumeMatch[1];
               const sourceClassParam = consumeMatch[2];
-              console.log(`[CST] Found consume type: ${consumeType}, source class param: ${sourceClassParam}`);
+              log(`Found consume type: ${consumeType}, source class param: ${sourceClassParam}`);
 
-              // Extract the class name from the parameter (remove .class if present)
-              const sourceClass = sourceClassParam.replace(/\.class$/, '');
-              console.log(`[CST] Extracted source class: ${sourceClass}`);
+              // Handle both formats: "ClassName.class" and "value = ClassName.class"
+              let sourceClass: string;
+              if (sourceClassParam.includes('=')) {
+                // Named parameter format: "value = ClassName.class"
+                const namedParamMatch = sourceClassParam.match(/value\s*=\s*([^.]+)\.class/);
+                if (namedParamMatch) {
+                  sourceClass = namedParamMatch[1];
+                  log(`Extracted source class from named parameter: ${sourceClass}`);
+                } else {
+                  log(`Could not parse named parameter format: "${sourceClassParam}"`);
+                  continue;
+                }
+              } else {
+                // Direct format: "ClassName.class"
+                sourceClass = sourceClassParam.replace(/\.class$/, '');
+                log(`Extracted source class from direct format: ${sourceClass}`);
+              }
 
               // Create connection from source class to current class
               const detailLabel = consumeType === 'Topic' || consumeType === 'ServiceStream' ? 'consumes' : `${consumeType} events`;
@@ -465,14 +484,14 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                 details: [],
               });
             } else {
-              console.log(`[CST] Could not parse consume annotation: "${annotationText}"`);
+              log(`Could not parse consume annotation: "${annotationText}"`);
             }
           }
         } else {
-          console.log(`[CST] No source text provided, cannot extract annotation`);
+          log(`No source text provided, cannot extract annotation`);
         }
       } else {
-        console.log(`[CST] No location information available for annotation`);
+        log(`No location information available for annotation`);
       }
     }
   }
@@ -485,7 +504,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
         if (classDecl.children.normalClassDeclaration[0].children.classBody && classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration) {
           const classBodyDecls = classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration;
           const clientFieldNames = findComponentClientFieldNames(classBodyDecls);
-          console.log(`[CST] Found ComponentClient field names in ${className}: ${clientFieldNames.join(', ')}`);
+          log(`Found ComponentClient field names in ${className}: ${clientFieldNames.join(', ')}`);
 
           classBodyDecls.forEach((bodyDecl: any) => {
             if (bodyDecl.children && bodyDecl.children.classMemberDeclaration && bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration) {
@@ -505,9 +524,9 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
   }
 
   // Extract all annotations and process consume annotations
-  console.log(`[CST] Extracting all annotations from CST...`);
+  log(`Extracting all annotations from CST...`);
   const allAnnotations = extractAllAnnotations(cst);
-  console.log(`[CST] Found ${allAnnotations.length} total annotations`);
+  log(`Found ${allAnnotations.length} total annotations`);
   extractConsumeAnnotationsFromList(allAnnotations);
 
   return connections;
