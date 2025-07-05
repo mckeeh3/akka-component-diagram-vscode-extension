@@ -39,7 +39,7 @@ const componentColors = {
   timedAction: 'bg-rose-600',
   agent: 'bg-pink-600',
   topic: 'bg-slate-500',
-  serviceStream: 'bg-slate-500',
+  serviceStream: 'bg-byzanthium',
   unknown: 'bg-sky-700',
 };
 

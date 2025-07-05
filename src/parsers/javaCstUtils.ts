@@ -47,6 +47,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     details: string[];
   }> = [];
   const topicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+  const serviceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
 
   // Helper: get class name
   function getClassName(classDecl: any): string | undefined {
@@ -513,6 +514,77 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     }
   }
 
+  // Helper: extract service stream annotations from annotations list
+  function extractServiceStreamAnnotationsFromList(annotations: Array<{ annotation: any; className: string }>) {
+    for (const { annotation, className } of annotations) {
+      // Use the annotation location to extract the full annotation text
+      if (annotation.location && annotation.location.startOffset !== undefined && annotation.location.endOffset !== undefined) {
+        log(`Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
+
+        if (sourceText) {
+          const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+          log(`Annotation text: "${annotationText}"`);
+
+          // Check for @Produce.ServiceStream and @Consume.FromServiceStream annotations
+          if (annotationText.startsWith('@Produce.ServiceStream') || annotationText.startsWith('@Consume.FromServiceStream')) {
+            log(`Found service stream annotation in class: ${className}`);
+
+            // Parse both @Produce.ServiceStream(id = "stream-name") and @Consume.FromServiceStream(id = "stream-name") formats
+            let serviceStreamMatch = annotationText.match(/@(Produce|Consume)\.(ServiceStream|FromServiceStream)\s*\(\s*id\s*=\s*"([^"]+)"[^)]*\)/);
+
+            if (serviceStreamMatch) {
+              const action = serviceStreamMatch[1]; // "Produce" or "Consume"
+              const streamType = serviceStreamMatch[2]; // "ServiceStream" or "FromServiceStream"
+              const streamName = serviceStreamMatch[3]; // The service stream name
+
+              log(`Found service stream annotation - Action: ${action}, Stream Type: ${streamType}, Stream: ${streamName}`);
+
+              // Create service stream node if it doesn't exist
+              const streamId = `servicestream:${streamName}`;
+              const existingStream = serviceStreamNodes.find((s) => s.id === streamId);
+              if (!existingStream) {
+                serviceStreamNodes.push({
+                  id: streamId,
+                  name: streamName,
+                  type: 'ServiceStream',
+                  uri: vscode.Uri.file(filename),
+                });
+                log(`Created service stream node: ${streamId}`);
+              }
+
+              // Create connection between component and service stream
+              if (action === 'Produce') {
+                // Component produces to service stream
+                connections.push({
+                  source: className,
+                  target: streamId,
+                  label: 'produces to',
+                  details: [],
+                });
+                log(`Created connection: ${className} -> ${streamId} (produces to)`);
+              } else if (action === 'Consume') {
+                // Component consumes from service stream
+                connections.push({
+                  source: streamId,
+                  target: className,
+                  label: 'consumes from',
+                  details: [],
+                });
+                log(`Created connection: ${streamId} -> ${className} (consumes from)`);
+              }
+            } else {
+              log(`Could not parse service stream annotation: "${annotationText}"`);
+            }
+          }
+        } else {
+          log(`No source text provided, cannot extract annotation`);
+        }
+      } else {
+        log(`No location information available for annotation`);
+      }
+    }
+  }
+
   // Helper: extract consume annotations from annotations list
   function extractConsumeAnnotationsFromList(annotations: Array<{ annotation: any; className: string }>) {
     for (const { annotation, className } of annotations) {
@@ -601,12 +673,13 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     });
   }
 
-  // Extract all annotations and process consume and topic annotations
+  // Extract all annotations and process consume, topic, and service stream annotations
   log(`Extracting all annotations from CST...`);
   const allAnnotations = extractAllAnnotations(cst);
   log(`Found ${allAnnotations.length} total annotations`);
   extractConsumeAnnotationsFromList(allAnnotations);
   extractTopicAnnotationsFromList(allAnnotations);
+  extractServiceStreamAnnotationsFromList(allAnnotations);
 
-  return { connections, topicNodes };
+  return { connections, topicNodes, serviceStreamNodes };
 }

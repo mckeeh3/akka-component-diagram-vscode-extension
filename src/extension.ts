@@ -309,7 +309,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -356,16 +356,24 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Collect all topic nodes from all files (scanProject command)
       const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
       for (const result of successfulParses) {
         if (result.cst) {
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           // Add topic nodes to the global collection (avoiding duplicates)
           topicNodes.forEach((topic) => {
             if (!allTopicNodes.find((t) => t.id === topic.id)) {
               allTopicNodes.push(topic);
+            }
+          });
+
+          // Add service stream nodes to the global collection (avoiding duplicates)
+          serviceStreamNodes.forEach((stream) => {
+            if (!allServiceStreamNodes.find((s) => s.id === stream.id)) {
+              allServiceStreamNodes.push(stream);
             }
           });
         }
@@ -374,6 +382,11 @@ export function activate(context: vscode.ExtensionContext) {
       log(`Found ${allTopicNodes.length} unique topic nodes across all files`);
       allTopicNodes.forEach((topic, index) => {
         log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
+      });
+
+      log(`Found ${allServiceStreamNodes.length} unique service stream nodes across all files`);
+      allServiceStreamNodes.forEach((stream, index) => {
+        log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
       });
 
       // Combine edges from both methods with deduplication to prevent overlap
@@ -459,8 +472,16 @@ export function activate(context: vscode.ExtensionContext) {
         uri: topic.uri,
       }));
 
-      // Combine regular nodes and topic nodes
-      const allNodes = [...nodesWithLayout, ...topicComponents];
+      // Convert service stream nodes to AkkaComponent format and add to diagram
+      const serviceStreamComponents: AkkaComponent[] = allServiceStreamNodes.map((stream) => ({
+        id: stream.id,
+        name: stream.name,
+        type: stream.type,
+        uri: stream.uri,
+      }));
+
+      // Combine regular nodes, topic nodes, and service stream nodes
+      const allNodes = [...nodesWithLayout, ...topicComponents, ...serviceStreamComponents];
 
       const diagramData = { nodes: allNodes, edges: allEdges };
 
@@ -617,7 +638,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -664,16 +685,24 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Collect all topic nodes from all files (generateCstDiagram command)
       const allCstTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allCstServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
       for (const result of successfulParses) {
         if (result.cst) {
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           // Add topic nodes to the global collection (avoiding duplicates)
           topicNodes.forEach((topic) => {
             if (!allCstTopicNodes.find((t) => t.id === topic.id)) {
               allCstTopicNodes.push(topic);
+            }
+          });
+
+          // Add service stream nodes to the global collection (avoiding duplicates)
+          serviceStreamNodes.forEach((stream) => {
+            if (!allCstServiceStreamNodes.find((s) => s.id === stream.id)) {
+              allCstServiceStreamNodes.push(stream);
             }
           });
         }
@@ -682,6 +711,11 @@ export function activate(context: vscode.ExtensionContext) {
       log(`Found ${allCstTopicNodes.length} unique topic nodes across all files`);
       allCstTopicNodes.forEach((topic, index) => {
         log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
+      });
+
+      log(`Found ${allCstServiceStreamNodes.length} unique service stream nodes across all files`);
+      allCstServiceStreamNodes.forEach((stream, index) => {
+        log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
       });
 
       // Convert CST components to AkkaComponent format
@@ -709,8 +743,16 @@ export function activate(context: vscode.ExtensionContext) {
         uri: topic.uri,
       }));
 
-      // Combine regular nodes and topic nodes
-      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents];
+      // Convert service stream nodes to AkkaComponent format and add to CST diagram
+      const cstServiceStreamComponents: AkkaComponent[] = allCstServiceStreamNodes.map((stream) => ({
+        id: stream.id,
+        name: stream.name,
+        type: stream.type,
+        uri: stream.uri,
+      }));
+
+      // Combine regular nodes, topic nodes, and service stream nodes
+      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents, ...cstServiceStreamComponents];
 
       // Aggregate CST edges to consolidate multiple method calls between the same components
       const aggregatedCstEdges = aggregateEdges(cstEdges);
