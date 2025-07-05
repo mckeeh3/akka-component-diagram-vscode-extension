@@ -13,6 +13,87 @@ import { createPrefixedLogger } from './utils/logger';
 let currentDiagramPanel: vscode.WebviewPanel | undefined;
 let currentCstDiagramPanel: vscode.WebviewPanel | undefined;
 
+// --- Helper Functions ---
+
+/**
+ * Find the exact location of a class in a Java file using CST parsing
+ */
+async function findClassLocation(className: string, fileUri: vscode.Uri, outputChannel?: vscode.OutputChannel): Promise<vscode.Position | null> {
+  const log = outputChannel ? createPrefixedLogger(outputChannel, '[Navigation]') : null;
+
+  try {
+    log?.('Finding class location for:', className, 'in file:', fileUri.fsPath);
+
+    // Parse the file using the Java parser
+    const parseResult = await JavaParser.parseFile(fileUri, outputChannel);
+
+    if (!parseResult.success || !parseResult.cst) {
+      log?.('Failed to parse file for navigation');
+      return null;
+    }
+
+    // Search for the class in the CST
+    const classLocation = findClassInCST(parseResult.cst, className, log);
+
+    if (classLocation) {
+      log?.('Found class location:', classLocation);
+      return classLocation;
+    } else {
+      log?.('Class not found in CST');
+      return null;
+    }
+  } catch (error) {
+    log?.('Error finding class location:', error);
+    return null;
+  }
+}
+
+/**
+ * Recursively search for a class in the CST
+ */
+function findClassInCST(node: any, className: string, log?: any): vscode.Position | null {
+  if (!node || typeof node !== 'object') return null;
+
+  // Check if this is a class declaration node
+  if (node.children && node.children.classDeclaration) {
+    const classDecl = node.children.classDeclaration[0];
+    if (classDecl.children && classDecl.children.normalClassDeclaration) {
+      const normalClass = classDecl.children.normalClassDeclaration[0];
+      if (normalClass.children && normalClass.children.identifier) {
+        const identifier = normalClass.children.identifier[0];
+        const foundClassName = identifier.image;
+
+        log?.('Checking class:', foundClassName, 'against target:', className);
+
+        if (foundClassName === className && identifier.location) {
+          log?.('Found matching class:', className);
+          return new vscode.Position(
+            identifier.location.startLine - 1, // Convert to 0-based
+            identifier.location.startColumn - 1 // Convert to 0-based
+          );
+        }
+      }
+    }
+  }
+
+  // Recursively search children
+  if (node.children) {
+    for (const [key, children] of Object.entries(node.children)) {
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          const result = findClassInCST(child, className, log);
+          if (result) return result;
+        }
+      } else if (children && typeof children === 'object') {
+        const result = findClassInCST(children, className, log);
+        if (result) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 // --- Extension Activation ---
 
 export function activate(context: vscode.ExtensionContext) {
@@ -353,7 +434,7 @@ export function activate(context: vscode.ExtensionContext) {
       // --- Create the Webview Panel ---
       if (diagramData.nodes.length > 0) {
         log(`Creating diagram with ${diagramData.nodes.length} nodes and ${diagramData.edges.length} edges`);
-        createDiagramPanel(context, diagramData, savedViewState);
+        createDiagramPanel(context, diagramData, savedViewState, outputChannel);
       } else {
         vscode.window.showWarningMessage('No Akka components found in this project.');
         log(`No Akka components found in the project`);
@@ -585,7 +666,7 @@ export function activate(context: vscode.ExtensionContext) {
       // --- Create the CST Webview Panel ---
       if (cstDiagramData.nodes.length > 0) {
         log(`Creating CST diagram with ${cstDiagramData.nodes.length} nodes and ${cstDiagramData.edges.length} edges`);
-        createCstDiagramPanel(context, cstDiagramData, savedCstViewState);
+        createCstDiagramPanel(context, cstDiagramData, savedCstViewState, outputChannel);
       } else {
         vscode.window.showWarningMessage('No Akka components found in this project.');
         log(`No Akka components found in the project`);
@@ -626,7 +707,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 // --- Webview Panel Creation ---
 
-function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState, outputChannel?: vscode.OutputChannel) {
   // Check if we already have an active diagram panel
   if (currentDiagramPanel) {
     // Update the existing panel with new data
@@ -677,16 +758,36 @@ function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: Akk
         case 'navigateTo':
           const component = data.nodes.find((n) => n.id === message.payload.componentId);
           if (component && component.uri.scheme !== 'untitled') {
-            const document = await vscode.workspace.openTextDocument(component.uri);
-            const editor = await vscode.window.showTextDocument(document);
+            try {
+              // Use CST parsing to find the exact class location
+              const classPosition = await findClassLocation(component.id, component.uri, outputChannel);
 
-            const text = document.getText();
-            const regex = new RegExp(`class\\s+${component.id}`);
-            const match = text.match(regex);
-            if (match && typeof match.index === 'number') {
-              const pos = document.positionAt(match.index);
-              editor.selection = new vscode.Selection(pos, pos);
-              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+              if (classPosition) {
+                const document = await vscode.workspace.openTextDocument(component.uri);
+                const editor = await vscode.window.showTextDocument(document);
+
+                // Set cursor position and reveal the class
+                editor.selection = new vscode.Selection(classPosition, classPosition);
+                editor.revealRange(new vscode.Range(classPosition, classPosition), vscode.TextEditorRevealType.InCenter);
+              } else {
+                // Fallback to simple regex if CST parsing fails
+                const document = await vscode.workspace.openTextDocument(component.uri);
+                const editor = await vscode.window.showTextDocument(document);
+
+                const text = document.getText();
+                const regex = new RegExp(`\\b(class|interface|enum)\\s+${component.id}\\b`);
+                const match = text.match(regex);
+                if (match && typeof match.index === 'number') {
+                  const pos = document.positionAt(match.index);
+                  editor.selection = new vscode.Selection(pos, pos);
+                  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+                }
+              }
+            } catch (error) {
+              if (outputChannel) {
+                const log = createPrefixedLogger(outputChannel, '[Navigation]');
+                log(`Error navigating to component ${component.id}: ${error}`);
+              }
             }
           }
           return;
@@ -706,7 +807,7 @@ function createDiagramPanel(context: vscode.ExtensionContext, data: { nodes: Akk
 
 // --- CST Diagram Panel Creation ---
 
-function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState) {
+function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: AkkaComponent[]; edges: AkkaEdge[] }, viewState: ViewState, outputChannel?: vscode.OutputChannel) {
   // Check if we already have an active CST diagram panel
   if (currentCstDiagramPanel) {
     // Update the existing panel with new data
@@ -757,16 +858,36 @@ function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: 
         case 'navigateTo':
           const component = data.nodes.find((n) => n.id === message.payload.componentId);
           if (component && component.uri.scheme !== 'untitled') {
-            const document = await vscode.workspace.openTextDocument(component.uri);
-            const editor = await vscode.window.showTextDocument(document);
+            try {
+              // Use CST parsing to find the exact class location
+              const classPosition = await findClassLocation(component.id, component.uri, outputChannel);
 
-            const text = document.getText();
-            const regex = new RegExp(`class\\s+${component.id}`);
-            const match = text.match(regex);
-            if (match && typeof match.index === 'number') {
-              const pos = document.positionAt(match.index);
-              editor.selection = new vscode.Selection(pos, pos);
-              editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+              if (classPosition) {
+                const document = await vscode.workspace.openTextDocument(component.uri);
+                const editor = await vscode.window.showTextDocument(document);
+
+                // Set cursor position and reveal the class
+                editor.selection = new vscode.Selection(classPosition, classPosition);
+                editor.revealRange(new vscode.Range(classPosition, classPosition), vscode.TextEditorRevealType.InCenter);
+              } else {
+                // Fallback to simple regex if CST parsing fails
+                const document = await vscode.workspace.openTextDocument(component.uri);
+                const editor = await vscode.window.showTextDocument(document);
+
+                const text = document.getText();
+                const regex = new RegExp(`\\b(class|interface|enum)\\s+${component.id}\\b`);
+                const match = text.match(regex);
+                if (match && typeof match.index === 'number') {
+                  const pos = document.positionAt(match.index);
+                  editor.selection = new vscode.Selection(pos, pos);
+                  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+                }
+              }
+            } catch (error) {
+              if (outputChannel) {
+                const log = createPrefixedLogger(outputChannel, '[Navigation]');
+                log(`Error navigating to component ${component.id}: ${error}`);
+              }
             }
           }
           return;

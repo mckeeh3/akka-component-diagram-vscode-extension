@@ -226,6 +226,7 @@ function onNodeClick(e) {
     }
   } else {
     if (selectedNodes.size <= 1) {
+      console.log('Navigating to node:', nodeId);
       vscode.postMessage({ command: 'navigateTo', payload: { componentId: nodeId } });
     }
   }
@@ -413,15 +414,15 @@ function setupEventListeners() {
       const worldX = (e.clientX - panX) / scale;
       const worldY = (e.clientY - panY) / scale;
       let hoveredEdge = null;
-      console.log('Mouse position (world):', worldX, worldY);
-      console.log('Number of hitboxes:', edgeLabelHitboxes.length);
+      // console.log('Mouse position (world):', worldX, worldY);
+      // console.log('Number of hitboxes:', edgeLabelHitboxes.length);
       for (const hitbox of edgeLabelHitboxes) {
-        console.log('Checking hitbox:', hitbox.x, hitbox.y, hitbox.width, hitbox.height);
+        // console.log('Checking hitbox:', hitbox.x, hitbox.y, hitbox.width, hitbox.height);
         if (worldX >= hitbox.x && worldX <= hitbox.x + hitbox.width && worldY >= hitbox.y && worldY <= hitbox.y + hitbox.height) {
           hoveredEdge = hitbox.edge;
-          console.log('Hovering over edge:', hoveredEdge);
-          console.log('Edge details:', hoveredEdge.details);
-          console.log('Edge details length:', hoveredEdge.details ? hoveredEdge.details.length : 'undefined');
+          // console.log('Hovering over edge:', hoveredEdge);
+          // console.log('Edge details:', hoveredEdge.details);
+          // console.log('Edge details length:', hoveredEdge.details ? hoveredEdge.details.length : 'undefined');
           break;
         }
       }
@@ -434,18 +435,18 @@ function setupEventListeners() {
         tooltip.classList.remove('hidden');
 
         // Debug: log the details being shown
-        console.log('Tooltip details:', hoveredEdge.details);
-        console.log('Tooltip HTML:', tooltip.innerHTML);
-        console.log('Tooltip element:', tooltip);
-        console.log('Tooltip visibility:', tooltip.classList.contains('hidden'));
-        console.log('Tooltip display style:', tooltip.style.display);
-        console.log('Tooltip position:', tooltip.style.left, tooltip.style.top);
+        // console.log('Tooltip details:', hoveredEdge.details);
+        // console.log('Tooltip HTML:', tooltip.innerHTML);
+        // console.log('Tooltip element:', tooltip);
+        // console.log('Tooltip visibility:', tooltip.classList.contains('hidden'));
+        // console.log('Tooltip display style:', tooltip.style.display);
+        // console.log('Tooltip position:', tooltip.style.left, tooltip.style.top);
       } else {
         tooltip.classList.add('hidden');
-        console.log('No details found for edge:', hoveredEdge);
+        // console.log('No details found for edge:', hoveredEdge);
         if (hoveredEdge) {
-          console.log('Edge has no details property:', !hoveredEdge.details);
-          console.log('Edge details is empty array:', hoveredEdge.details && hoveredEdge.details.length === 0);
+          // console.log('Edge has no details property:', !hoveredEdge.details);
+          // console.log('Edge details is empty array:', hoveredEdge.details && hoveredEdge.details.length === 0);
         }
       }
     }
