@@ -12,6 +12,7 @@ This VSCode extension scans your Java project for Akka SDK components and genera
 * **Topic Support**: Detects `@Produce.ToTopic` and `@Consume.FromTopic` annotations and creates topic nodes in the diagram.
 * **Service Stream Support**: Detects `@Produce.ServiceStream` and `@Consume.FromServiceStream` annotations and creates service stream nodes.
 * **Interactive Diagram**: Renders components as nodes and their interactions as labeled edges in a dedicated editor tab.
+* **Mermaid Diagram Generation**: Generate Mermaid markdown diagrams for documentation, presentations, or sharing with other tools.
 * **Marquee Selection**: Hold `Shift` key while clicking and dragging on the diagram background to draw a selection box. Or, while holding the `Shift` key, click other nodes to select multiple nodes.
 * **Manual Layout with Persistence**: Manually arrange the diagram by dragging nodes. Your custom layout, pan, and zoom settings are saved and restored between sessions.
 * **Click-to-Navigate**: Simply click on any component node in the diagram to instantly open the corresponding source file and jump to the class definition.
@@ -57,6 +58,7 @@ The primary way to use the extension is through the File Explorer context menu.
 
 * **Akka: Generate Component Diagram**: Generate a diagram for the selected folder or the entire workspace
 * **Akka: Clear Saved Diagram Layout**: Clear all saved node positions and view settings (accessible via `Ctrl+Shift+P` command palette)
+* **Akka: Generate Mermaid Diagram**: Generate a Mermaid markdown diagram from your Akka components (accessible via `Ctrl+Shift+P` mac `cmd+Shift+P` command palette)
 
 ### **Interacting with the Diagram**
 
@@ -71,6 +73,45 @@ The primary way to use the extension is through the File Explorer context menu.
   * Mac Trackpad: Use a two-finger drag gesture (up to zoom out, down to zoom in) or a pinch-to-zoom gesture.
   * Marquee Selection: Hold `Shift` while clicking and dragging on the diagram background to draw a selection box.
 * **Delete Selected Nodes**: Click anywhere on the diagram's background (without holding `Shift`) or press the `Escape` key.
+
+### **Generating Mermaid Diagrams**
+
+The extension can generate Mermaid markdown diagrams for documentation and sharing:
+
+1. **Open or create a markdown file** in VSCode
+2. **Run the command** `Ctrl+Shift+P` mac `cmd+Shift+P` → "Akka: Generate Mermaid Diagram"
+3. **Follow the prompts** to specify the source folder to scan
+4. **The diagram will be generated** and saved to your markdown file
+
+The generated Mermaid diagram includes:
+
+* **Color-coded nodes** for different component types (endpoints, entities, views, etc.)
+* **Labeled connections** showing method invocations and data flow
+* **Topic and service stream nodes** with dashed borders
+* **Professional styling** suitable for documentation and presentations
+* **Configurable themes** (default, forest, dark, neutral) via VSCode settings
+
+You can then use any Mermaid-compatible viewer or renderer to display the diagram.
+
+## **Configuration**
+
+The extension supports the following configuration options:
+
+### **Mermaid Theme**
+
+Configure the theme for generated Mermaid diagrams:
+
+- **Setting**: `akkaDiagramGenerator.mermaidTheme`
+- **Default**: `neutral`
+- **Options**: `default`, `forest`, `dark`, `neutral`
+
+You can change this setting in VSCode's settings (File → Preferences → Settings) or by editing your `settings.json` file:
+
+```json
+{
+  "akkaDiagramGenerator.mermaidTheme": "dark"
+}
+```
 
 ## **Technical Details**
 

@@ -5,6 +5,7 @@ import { JavaParser } from './parsers/javaParser';
 import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './parsers/javaCstUtils';
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 import { createPrefixedLogger } from './utils/logger';
+import { generateMermaidDiagram, generateSimpleMermaidDiagram } from './utils/mermaidGenerator';
 
 // Helper function to aggregate CST edges
 function aggregateCstEdges(edges: AkkaEdge[]): AkkaEdge[] {
@@ -792,7 +793,230 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable, generateCstDiagramDisposable, clearCstLayoutDisposable);
+  let generateMermaidDiagramDisposable = vscode.commands.registerCommand('akka-diagram-generator.generateMermaidDiagram', async () => {
+    const log = createPrefixedLogger(outputChannel, '[Mermaid]');
+
+    try {
+      log('========================================');
+      log('COMMAND EXECUTED: akka-diagram-generator.generateMermaidDiagram');
+      log('========================================');
+
+      // Check if there's an active markdown editor
+      const activeEditor = vscode.window.activeTextEditor;
+      let targetDocument: vscode.TextDocument | undefined;
+
+      if (activeEditor && activeEditor.document.languageId === 'markdown') {
+        targetDocument = activeEditor.document;
+        log(`Using active markdown document: ${targetDocument.fileName}`);
+      } else {
+        // Prompt user to create or select a markdown file
+        const result = await vscode.window.showInformationMessage(
+          'No markdown file is currently open. Would you like to create a new markdown file for the Mermaid diagram?',
+          'Create New File',
+          'Select Existing File',
+          'Cancel'
+        );
+
+        if (result === 'Create New File') {
+          const fileName = await vscode.window.showInputBox({
+            prompt: 'Enter the name for the markdown file (e.g., akka-diagram.md)',
+            value: 'akka-diagram.md',
+            placeHolder: 'akka-diagram.md',
+          });
+
+          if (!fileName) {
+            log('User cancelled file creation');
+            return;
+          }
+
+          // Create new markdown file
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+          if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found.');
+            return;
+          }
+
+          const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
+          targetDocument = await vscode.workspace.openTextDocument(fileUri);
+          await vscode.window.showTextDocument(targetDocument);
+          log(`Created new markdown file: ${fileUri.fsPath}`);
+        } else if (result === 'Select Existing File') {
+          const uris = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: {
+              'Markdown files': ['md', 'markdown'],
+            },
+          });
+
+          if (uris && uris.length > 0) {
+            targetDocument = await vscode.workspace.openTextDocument(uris[0]);
+            await vscode.window.showTextDocument(targetDocument);
+            log(`Selected existing markdown file: ${targetDocument.fileName}`);
+          } else {
+            log('User cancelled file selection');
+            return;
+          }
+        } else {
+          log('User cancelled operation');
+          return;
+        }
+      }
+
+      if (!targetDocument) {
+        vscode.window.showErrorMessage('No target markdown file available.');
+        return;
+      }
+
+      // Prompt for source folder
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found.');
+        return;
+      }
+
+      const sourceFolder = await vscode.window.showInputBox({
+        prompt: 'Enter the path to scan for Java files (relative to workspace root)',
+        value: 'src/main/java',
+        placeHolder: 'src/main/java',
+      });
+
+      if (!sourceFolder) {
+        log('User cancelled source folder input');
+        return;
+      }
+
+      const scanPath = path.join(workspaceFolder.uri.fsPath, sourceFolder);
+      log(`Scanning folder: ${scanPath}`);
+
+      // Find Java files
+      const pattern = new vscode.RelativePattern(scanPath, '**/*.java');
+      const javaFiles = await vscode.workspace.findFiles(pattern, '**/target/**');
+
+      if (javaFiles.length === 0) {
+        vscode.window.showWarningMessage('No Java files found in the specified folder.');
+        log('No Java files found');
+        return;
+      }
+
+      vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s) for Mermaid diagram...`);
+      log(`Found ${javaFiles.length} Java files to scan`);
+
+      // Parse Java files
+      const parseResults = await JavaParser.parseFiles(javaFiles, outputChannel);
+      const successfulParses = parseResults.filter((r) => r.success);
+
+      if (successfulParses.length === 0) {
+        vscode.window.showErrorMessage('Failed to parse any Java files.');
+        return;
+      }
+
+      // Extract components and connections
+      const allAkkaComponents: Array<{
+        filename: string;
+        className: string;
+        componentType: string;
+        componentId: string;
+      }> = [];
+
+      const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const cstEdges: AkkaEdge[] = [];
+
+      for (const result of successfulParses) {
+        if (result.cst) {
+          // Extract components
+          const components = JavaParser.extractAkkaComponentsFromCST(result.cst, result.filename);
+          allAkkaComponents.push(...components);
+
+          // Extract connections and nodes
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+
+          // Add connections
+          connections.forEach((conn) => {
+            const edge: AkkaEdge = {
+              source: conn.source,
+              target: conn.target,
+              label: conn.label,
+              details: conn.details,
+            };
+            cstEdges.push(edge);
+          });
+
+          // Add topic and service stream nodes
+          topicNodes.forEach((topic) => {
+            if (!allTopicNodes.find((t) => t.id === topic.id)) {
+              allTopicNodes.push(topic);
+            }
+          });
+
+          serviceStreamNodes.forEach((stream) => {
+            if (!allServiceStreamNodes.find((s) => s.id === stream.id)) {
+              allServiceStreamNodes.push(stream);
+            }
+          });
+        }
+      }
+
+      // Convert to AkkaComponent format
+      const cstNodes: AkkaComponent[] = allAkkaComponents.map((component) => ({
+        id: component.className,
+        name: component.componentId || component.className,
+        type: component.componentType,
+        uri: vscode.Uri.file(component.filename),
+      }));
+
+      const topicComponents: AkkaComponent[] = allTopicNodes.map((topic) => ({
+        id: topic.id,
+        name: topic.name,
+        type: topic.type,
+        uri: topic.uri,
+      }));
+
+      const serviceStreamComponents: AkkaComponent[] = allServiceStreamNodes.map((stream) => ({
+        id: stream.id,
+        name: stream.name,
+        type: stream.type,
+        uri: stream.uri,
+      }));
+
+      const allNodes = [...cstNodes, ...topicComponents, ...serviceStreamComponents];
+      const aggregatedEdges = aggregateCstEdges(cstEdges);
+
+      // Get theme from configuration
+      const config = vscode.workspace.getConfiguration('akkaDiagramGenerator');
+      const theme = config.get<string>('mermaidTheme', 'neutral') as 'default' | 'forest' | 'dark' | 'neutral';
+
+      // Generate Mermaid diagram
+      const mermaidContent = generateMermaidDiagram(allNodes, aggregatedEdges, {
+        title: `Akka Component Diagram - ${path.basename(workspaceFolder.name)}`,
+        direction: 'TB',
+        theme: theme,
+      });
+
+      // Update the markdown document
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(targetDocument.uri, new vscode.Range(0, 0, targetDocument.lineCount, 0), mermaidContent);
+
+      await vscode.workspace.applyEdit(edit);
+      await targetDocument.save();
+
+      vscode.window.showInformationMessage(`Mermaid diagram generated successfully with ${allNodes.length} components and ${aggregatedEdges.length} connections.`);
+
+      log(`Mermaid diagram generated with ${allNodes.length} nodes and ${aggregatedEdges.length} edges`);
+      log(`Diagram saved to: ${targetDocument.fileName}`);
+    } catch (error) {
+      console.error('[Extension] Error in command "akka-diagram-generator.generateMermaidDiagram"', error);
+      log(`ERROR: ${error}`);
+      log(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+      vscode.window.showErrorMessage('An error occurred while generating the Mermaid diagram.');
+    }
+  });
+
+  context.subscriptions.push(scanProjectDisposable, clearLayoutDisposable, generateCstDiagramDisposable, clearCstLayoutDisposable, generateMermaidDiagramDisposable);
 }
 
 // --- Webview Panel Creation ---
@@ -918,7 +1142,7 @@ function createCstDiagramPanel(context: vscode.ExtensionContext, data: { nodes: 
   }
 
   // Create a new panel if none exists
-  const panel = vscode.window.createWebviewPanel('akkaCstDiagram', 'Akka Component Diagram (CST)', vscode.ViewColumn.One, {
+  const panel = vscode.window.createWebviewPanel('akkaCstDiagram', 'Akka Component Diagram', vscode.ViewColumn.One, {
     enableScripts: true,
     retainContextWhenHidden: true,
   });

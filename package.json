@@ -2,7 +2,7 @@
   "name": "akka-diagram-generator",
   "displayName": "Akka Component Diagram Generator",
   "description": "Scans Java source code to generate Akka component diagrams.",
-  "version": "v0.0.7",
+  "version": "v0.0.8",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -10,10 +10,27 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:akka-diagram-generator.generateCstDiagram"
+    "onCommand:akka-diagram-generator.generateCstDiagram",
+    "onCommand:akka-diagram-generator.generateMermaidDiagram"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Akka Diagram Generator",
+      "properties": {
+        "akkaDiagramGenerator.mermaidTheme": {
+          "type": "string",
+          "default": "neutral",
+          "enum": [
+            "default",
+            "forest",
+            "dark",
+            "neutral"
+          ],
+          "description": "Theme for generated Mermaid diagrams"
+        }
+      }
+    },
     "commands": [
       {
         "command": "akka-diagram-generator.generateCstDiagram",
@@ -22,6 +39,10 @@
       {
         "command": "akka-diagram-generator.clearCstLayout",
         "title": "Akka: Clear Saved Diagram Layout"
+      },
+      {
+        "command": "akka-diagram-generator.generateMermaidDiagram",
+        "title": "Akka: Generate Mermaid Diagram"
       }
     ],
     "menus": {
@@ -35,6 +56,11 @@
           "when": "resourceLangId == java || explorerResourceIsFolder",
           "command": "akka-diagram-generator.clearCstLayout",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "akka-diagram-generator.generateMermaidDiagram"
         }
       ]
     }
