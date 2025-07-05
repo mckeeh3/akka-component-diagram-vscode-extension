@@ -529,51 +529,58 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
           if (annotationText.startsWith('@Produce.ServiceStream') || annotationText.startsWith('@Consume.FromServiceStream')) {
             log(`Found service stream annotation in class: ${className}`);
 
-            // Parse both @Produce.ServiceStream(id = "stream-name") and @Consume.FromServiceStream(id = "stream-name") formats
-            let serviceStreamMatch = annotationText.match(/@(Produce|Consume)\.(ServiceStream|FromServiceStream)\s*\(\s*id\s*=\s*"([^"]+)"[^)]*\)/);
+            // Extract parameters (service, id, etc.)
+            // Match all key = "value" pairs inside the annotation
+            const paramRegex = /(\w+)\s*=\s*"([^"]+)"/g;
+            let match;
+            let params: Record<string, string> = {};
+            while ((match = paramRegex.exec(annotationText)) !== null) {
+              params[match[1]] = match[2];
+            }
 
-            if (serviceStreamMatch) {
-              const action = serviceStreamMatch[1]; // "Produce" or "Consume"
-              const streamType = serviceStreamMatch[2]; // "ServiceStream" or "FromServiceStream"
-              const streamName = serviceStreamMatch[3]; // The service stream name
+            // Determine the stream name: prefer 'service', fallback to 'id'
+            const streamName = params['service'] || params['id'];
+            if (!streamName) {
+              log(`Could not determine service stream name from annotation: "${annotationText}"`);
+              continue;
+            }
 
-              log(`Found service stream annotation - Action: ${action}, Stream Type: ${streamType}, Stream: ${streamName}`);
+            // Create service stream node if it doesn't exist
+            const streamId = `servicestream:${streamName}`;
+            const existingStream = serviceStreamNodes.find((s) => s.id === streamId);
+            if (!existingStream) {
+              serviceStreamNodes.push({
+                id: streamId,
+                name: streamName,
+                type: 'ServiceStream',
+                uri: vscode.Uri.file(filename),
+              });
+              log(`Created service stream node: ${streamId}`);
+            }
 
-              // Create service stream node if it doesn't exist
-              const streamId = `servicestream:${streamName}`;
-              const existingStream = serviceStreamNodes.find((s) => s.id === streamId);
-              if (!existingStream) {
-                serviceStreamNodes.push({
-                  id: streamId,
-                  name: streamName,
-                  type: 'ServiceStream',
-                  uri: vscode.Uri.file(filename),
-                });
-                log(`Created service stream node: ${streamId}`);
-              }
+            // Determine action (Produce or Consume)
+            let action = 'Consume';
+            if (/^@Produce\.ServiceStream/.test(annotationText)) action = 'Produce';
 
-              // Create connection between component and service stream
-              if (action === 'Produce') {
-                // Component produces to service stream
-                connections.push({
-                  source: className,
-                  target: streamId,
-                  label: 'produces to',
-                  details: [],
-                });
-                log(`Created connection: ${className} -> ${streamId} (produces to)`);
-              } else if (action === 'Consume') {
-                // Component consumes from service stream
-                connections.push({
-                  source: streamId,
-                  target: className,
-                  label: 'consumes from',
-                  details: [],
-                });
-                log(`Created connection: ${streamId} -> ${className} (consumes from)`);
-              }
+            // Create connection between component and service stream
+            if (action === 'Produce') {
+              // Component produces to service stream
+              connections.push({
+                source: className,
+                target: streamId,
+                label: 'produces to',
+                details: [],
+              });
+              log(`Created connection: ${className} -> ${streamId} (produces to)`);
             } else {
-              log(`Could not parse service stream annotation: "${annotationText}"`);
+              // Component consumes from service stream
+              connections.push({
+                source: streamId,
+                target: className,
+                label: 'consumes from',
+                details: [],
+              });
+              log(`Created connection: ${streamId} -> ${className} (consumes from)`);
             }
           }
         } else {
