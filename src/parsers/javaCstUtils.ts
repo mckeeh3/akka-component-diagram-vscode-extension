@@ -67,6 +67,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
   // Helper: find injected ComponentClient field names in the class
   function findComponentClientFieldNames(classBodyDecls: any[]): string[] {
     const fieldNames: string[] = [];
+    log(`Finding ComponentClient field names in class body declarations...`);
 
     // 1. Find constructor(s)
     for (const bodyDecl of classBodyDecls) {
@@ -229,6 +230,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                           const fieldName =
                             expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier[0].image;
                           fieldNames.push(fieldName);
+                          log(`Found ComponentClient field assignment: ${fieldName} = ${paramName}`);
                         }
                       }
                     }
@@ -240,6 +242,50 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
         }
       }
     }
+
+    // Fallback: if no field names found, try to find any field that might be a ComponentClient
+    if (fieldNames.length === 0) {
+      log(`No ComponentClient field names found with complex detection, trying fallback...`);
+      for (const bodyDecl of classBodyDecls) {
+        if (bodyDecl.children && bodyDecl.children.fieldDeclaration) {
+          const fieldDecl = bodyDecl.children.fieldDeclaration[0];
+          if (fieldDecl.children && fieldDecl.children.unannType) {
+            const type = fieldDecl.children.unannType[0];
+            if (type.children && type.children.unannReferenceType) {
+              const refType = type.children.unannReferenceType[0];
+              if (refType.children && refType.children.unannClassOrInterfaceType) {
+                const classType = refType.children.unannClassOrInterfaceType[0];
+                if (classType.children && classType.children.unannClassType) {
+                  const classTypeNode = classType.children.unannClassType[0];
+                  if (classTypeNode.children && classTypeNode.children.Identifier) {
+                    const typeName = classTypeNode.children.Identifier[0].image;
+                    if (typeName.includes('ComponentClient')) {
+                      // Get the field name
+                      if (fieldDecl.children && fieldDecl.children.variableDeclaratorList) {
+                        const varList = fieldDecl.children.variableDeclaratorList[0];
+                        if (varList.children && varList.children.variableDeclarator) {
+                          const varDecl = varList.children.variableDeclarator[0];
+                          if (varDecl.children && varDecl.children.variableDeclaratorId) {
+                            const varId = varDecl.children.variableDeclaratorId[0];
+                            if (varId.children && varId.children.Identifier) {
+                              const fieldName = varId.children.Identifier[0].image;
+                              fieldNames.push(fieldName);
+                              log(`Found ComponentClient field with fallback: ${fieldName}`);
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    log(`ComponentClient field names found: ${fieldNames.join(', ')}`);
     return fieldNames;
   }
 
@@ -279,6 +325,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                       }
                     }
                     if (varName && clientFieldNames.includes(varName)) {
+                      log(`Found component client field: ${varName}`);
                       // Walk the primarySuffix chain
                       const suffixes = primary.children.primarySuffix || [];
                       let chain = [];
@@ -293,8 +340,19 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                             if (partCommon.children && partCommon.children.Identifier) {
                               const firstMethod = partCommon.children.Identifier[0].image;
                               chain.push(firstMethod);
+                              log(`Extracted first method from FQN: ${firstMethod}`);
                             }
                           }
+                        }
+                      }
+
+                      // If no method was extracted from FQN, try to extract from the first suffix
+                      if (chain.length === 0 && suffixes.length > 0) {
+                        const firstSuffix = suffixes[0];
+                        if (firstSuffix.children && firstSuffix.children.Identifier) {
+                          const firstMethod = firstSuffix.children.Identifier[0].image;
+                          chain.push(firstMethod);
+                          log(`Extracted first method from first suffix: ${firstMethod}`);
                         }
                       }
 
@@ -305,27 +363,75 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                           // Extract method name from Dot.Identifier
                           const methodName = suffix.children.Identifier[0].image;
                           chain.push(methodName);
+                          log(`Extracted method from suffix ${i}: ${methodName}`);
                         }
                       }
 
-                      // Look for for* -> method -> invoke pattern
+                      // Look for for* -> [any methods] -> method -> invoke pattern
                       log(`Checking chain: ${chain.join(' -> ')}`);
-                      if (
-                        chain.length >= 3 &&
-                        (chain[0].startsWith('for') || chain[0] === 'forView' || chain[0] === 'forEventSourcedEntity') &&
-                        chain[1] === 'method' &&
-                        (chain[2] === 'invoke' || chain[2] === 'invokeAsync')
-                      ) {
+
+                      // Find the pattern: starts with for*, contains method, ends with invoke
+                      const hasForMethod = chain.some((method) => method.startsWith('for') || method === 'forView' || method === 'forEventSourcedEntity');
+                      const hasMethodCall = chain.includes('method');
+                      const hasInvokeCall = chain.some((method) => method === 'invoke' || method === 'invokeAsync');
+
+                      if (hasForMethod && hasMethodCall && hasInvokeCall) {
                         log(`Found valid chain pattern: ${chain.join(' -> ')}`);
                         // Extract target component type and method name from the method reference argument
                         let targetComponentType = '';
                         let calledMethodName = '';
-                        if (suffixes.length >= 3 && suffixes[2].children && suffixes[2].children.methodInvocationSuffix) {
-                          const methodInv = suffixes[2].children.methodInvocationSuffix[0];
+
+                        // Find the method invocation that contains the method parameter
+                        // The method parameter is typically in the 'method()' call, not the 'invoke()' call
+                        let methodInv = null;
+                        let methodSuffixIndex = -1;
+                        log(`Looking for method invocation in ${suffixes.length} suffixes...`);
+
+                        // First, find the 'method' suffix that contains the method parameter
+                        for (let i = 0; i < suffixes.length; i++) {
+                          const suffix = suffixes[i];
+                          log(`Checking suffix ${i}: ${JSON.stringify(Object.keys(suffix.children || {}))}`);
+                          if (suffix.children && suffix.children.methodInvocationSuffix) {
+                            const methodSuffix = suffix.children.methodInvocationSuffix[0];
+                            // Check if this is the 'method' call by looking at the previous identifier
+                            if (i > 0 && suffixes[i - 1].children && suffixes[i - 1].children.Identifier) {
+                              const prevMethod = suffixes[i - 1].children.Identifier[0].image;
+                              if (prevMethod === 'method') {
+                                methodInv = methodSuffix;
+                                methodSuffixIndex = i;
+                                log(`Found method invocation in suffix ${i} (method call)`);
+                                break;
+                              }
+                            }
+                          }
+                        }
+
+                        // If we didn't find the method call, fall back to the last method invocation (invoke)
+                        if (!methodInv) {
+                          for (let i = 0; i < suffixes.length; i++) {
+                            const suffix = suffixes[i];
+                            if (suffix.children && suffix.children.methodInvocationSuffix) {
+                              methodInv = suffix.children.methodInvocationSuffix[0];
+                              methodSuffixIndex = i;
+                              log(`Found method invocation in suffix ${i} (fallback)`);
+                              break;
+                            }
+                          }
+                        }
+
+                        if (methodInv) {
+                          log(`Found method invocation, checking for argument list...`);
+                          log(`Method invocation children: ${JSON.stringify(Object.keys(methodInv.children || {}))}`);
+
                           if (methodInv.children && methodInv.children.argumentList) {
                             const argList = methodInv.children.argumentList[0];
+                            log(`Found argument list, checking for expressions...`);
+                            log(`Argument list children: ${JSON.stringify(Object.keys(argList.children || {}))}`);
+
                             if (argList.children && argList.children.expression) {
                               const expr = argList.children.expression[0];
+                              log(`Found expression in argument list`);
+                              log(`Expression children: ${JSON.stringify(Object.keys(expr.children || {}))}`);
 
                               // Use the location offsets to extract the method parameter directly from source text
                               if (methodInv.location && methodInv.location.startOffset !== undefined && methodInv.location.endOffset !== undefined) {
@@ -348,6 +454,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                                     log(`Extracted from text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
                                   } else {
                                     log(`Could not parse method parameter: "${cleanParamText}"`);
+                                    log(`Parts after split: ${JSON.stringify(parts)}`);
                                   }
                                 } else {
                                   log(`No source text provided, cannot extract method name`);
@@ -355,8 +462,58 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                               } else {
                                 log(`No location information available for method invocation`);
                               }
+                            } else {
+                              log(`No expression found in argument list`);
+                              // Try to find the method reference in a different way
+                              if (argList.children) {
+                                log(`Available children in argument list: ${JSON.stringify(Object.keys(argList.children))}`);
+                                // Look for methodReference or other possible structures
+                                for (const [childKey, childValue] of Object.entries(argList.children)) {
+                                  log(`Checking argument list child: ${childKey}`);
+                                  if (Array.isArray(childValue) && childValue.length > 0) {
+                                    const child = childValue[0];
+                                    log(`Child ${childKey} has location: ${child.location ? 'yes' : 'no'}`);
+                                    if (child.location && sourceText) {
+                                      const childText = extractSourceAtLocation(sourceText, child.location);
+                                      log(`Child ${childKey} text: "${childText}"`);
+
+                                      // Parse the ClassName::methodName format
+                                      const parts = childText.split('::');
+                                      if (parts.length === 2) {
+                                        targetComponentType = parts[0];
+                                        calledMethodName = parts[1];
+                                        log(`Extracted from child ${childKey} - Class: ${targetComponentType}, Method: ${calledMethodName}`);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          } else {
+                            log(`No argument list found in method invocation`);
+                            // Try to extract method parameter from the method invocation itself
+                            if (methodInv.location && sourceText) {
+                              const methodInvText = extractSourceAtLocation(sourceText, methodInv.location);
+                              log(`Method invocation text: "${methodInvText}"`);
+
+                              // Try to extract the argument from the method invocation text
+                              const argMatch = methodInvText.match(/\(([^)]+)\)/);
+                              if (argMatch) {
+                                const argText = argMatch[1];
+                                log(`Extracted argument text: "${argText}"`);
+
+                                const parts = argText.split('::');
+                                if (parts.length === 2) {
+                                  targetComponentType = parts[0];
+                                  calledMethodName = parts[1];
+                                  log(`Extracted from method invocation text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
+                                }
+                              }
                             }
                           }
+                        } else {
+                          log(`No method invocation found in suffixes`);
                         }
 
                         // Method name extraction is now done in the same loop where we find the class name
