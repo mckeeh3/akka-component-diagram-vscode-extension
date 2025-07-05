@@ -1,18 +1,35 @@
 # **Akka Component Diagram Generator for VSCode**
 
-This VSCode extension scans your Java project for Akka SDK components and generates an interactive, visual diagram of their relationships. It's designed to help you quickly understand the architecture of your Akka SDK services.
+This VSCode extension scans your Java project for Akka SDK components and generates an interactive, visual diagram of their relationships. It uses advanced CST (Concrete Syntax Tree) parsing to accurately detect component interactions and dependencies.
 
 ![diagram](example-component-diagram.png)
 
 ## **Features**
 
-* **Automatic Component Detection**: Scans your source code to find Akka SDK components like Endpoints, Entities, Views, Consumers, Workflows, and more.
+* **Advanced CST Parsing**: Uses Java CST parsing for accurate detection of Akka SDK components and their interactions.
+* **Component Detection**: Automatically finds Akka SDK components like Endpoints, Entities, Views, Consumers, Workflows, and more.
+* **Method Chain Detection**: Detects fluent API calls like `componentClient.forAgent().inSession().method(HelloWorldAgent::greet).invoke()` with flexible method chain support.
+* **Topic Support**: Detects `@Produce.ToTopic` and `@Consume.FromTopic` annotations and creates topic nodes in the diagram.
+* **Service Stream Support**: Detects `@Produce.ServiceStream` and `@Consume.FromServiceStream` annotations and creates service stream nodes.
 * **Interactive Diagram**: Renders components as nodes and their interactions as labeled edges in a dedicated editor tab.
 * **Marquee Selection**: Hold `Shift` key while clicking and dragging on the diagram background to draw a selection box. Or, while holding the `Shift` key, click other nodes to select multiple nodes.
 * **Manual Layout with Persistence**: Manually arrange the diagram by dragging nodes. Your custom layout, pan, and zoom settings are saved and restored between sessions.
 * **Click-to-Navigate**: Simply click on any component node in the diagram to instantly open the corresponding source file and jump to the class definition.
 * **Scoped Scans**: Right-click on any folder in the VSCode File Explorer to generate a diagram for just that part of your project.
 * **Detailed Interaction Tooltips**: Hover over the connection lines between components to see a detailed list of the specific methods being invoked.
+
+## **Supported Annotations**
+
+The extension detects the following Akka SDK annotations:
+
+* **`@ComponentId`**: Marks a class as an Akka component
+* **`@HttpEndpoint`**: Marks a class as an HTTP endpoint
+* **`@GrpcEndpoint`**: Marks a class as a gRPC endpoint
+* **`@MCPEndpoint`**: Marks a class as an MCP endpoint
+* **`@Produce.ToTopic("topic-name")`**: Indicates the component produces messages to a topic
+* **`@Consume.FromTopic("topic-name")`**: Indicates the component consumes messages from a topic
+* **`@Produce.ServiceStream("service-name")`**: Indicates the component produces to a service stream
+* **`@Consume.FromServiceStream("service-name")`**: Indicates the component consumes from a service stream
 
 ## **Installation**
 
@@ -54,6 +71,18 @@ The primary way to use the extension is through the File Explorer context menu.
   * Mac Trackpad: Use a two-finger drag gesture (up to zoom out, down to zoom in) or a pinch-to-zoom gesture.
   * Marquee Selection: Hold `Shift` while clicking and dragging on the diagram background to draw a selection box.
 * **Delete Selected Nodes**: Click anywhere on the diagram's background (without holding `Shift`) or press the `Escape` key.
+
+## **Technical Details**
+
+The extension uses advanced Java CST parsing to accurately detect:
+
+* **Component Declarations**: Classes annotated with Akka SDK annotations
+* **Method Invocations**: Component client calls with fluent API chains
+* **Topic Interactions**: Produce/consume annotations for messaging topics
+* **Service Stream Interactions**: Produce/consume annotations for service streams
+* **Flexible Method Chains**: Supports additional methods like `.inSession()` between required calls
+
+The CST-based approach provides more accurate detection compared to regex-based parsing, especially for complex method chains and nested expressions.
 
 ## **License**
 

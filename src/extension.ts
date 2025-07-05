@@ -2,10 +2,46 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { getWebviewContent } from './webview/webviewManager';
 import { JavaParser } from './parsers/javaParser';
-import { parseNodes, parseEdges, aggregateEdges } from './parsers/akkaParser';
 import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './parsers/javaCstUtils';
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 import { createPrefixedLogger } from './utils/logger';
+
+// Helper function to aggregate CST edges
+function aggregateCstEdges(edges: AkkaEdge[]): AkkaEdge[] {
+  const edgeMap = new Map<string, AkkaEdge>();
+
+  edges.forEach((edge) => {
+    const key = `${edge.source}->${edge.target}`;
+    const existing = edgeMap.get(key);
+
+    if (existing) {
+      if (edge.label !== 'consumes' && edge.label !== 'produces to' && !existing.details.includes(edge.label)) {
+        existing.details.push(edge.label);
+      }
+    } else {
+      const newEdge: AkkaEdge = {
+        source: edge.source,
+        target: edge.target,
+        label: '', // Will be set later
+        details: [],
+      };
+      if (edge.label !== 'consumes' && edge.label !== 'produces to') {
+        newEdge.details.push(edge.label);
+      }
+      edgeMap.set(key, newEdge);
+    }
+  });
+
+  return Array.from(edgeMap.values()).map((edge) => {
+    if (edge.details.length > 0) {
+      edge.label = `invokes (${edge.details.length} methods)`;
+    } else {
+      const originalEdge = edges.find((e) => e.source === edge.source && e.target === edge.target);
+      edge.label = originalEdge ? originalEdge.label : '';
+    }
+    return edge;
+  });
+}
 
 // --- Type Definitions ---
 
@@ -270,32 +306,6 @@ export function activate(context: vscode.ExtensionContext) {
         });
       }
 
-      log(`========================================`);
-      log(`STARTING REGEX-BASED EDGE DETECTION`);
-      log(`========================================`);
-      log(`Starting regex-based component detection...`);
-      const parsedNodes = await parseNodes(javaFiles, outputChannel);
-      const foundEdges = await parseEdges(parsedNodes, outputChannel);
-
-      const aggregatedEdges = aggregateEdges(foundEdges);
-
-      log(`Regex parsing complete. Found ${parsedNodes.size} components and ${aggregatedEdges.length} edges`);
-
-      // Log all found edges from regex parsing
-      if (aggregatedEdges.length > 0) {
-        log(`Found ${aggregatedEdges.length} edges from regex parsing:`);
-        aggregatedEdges.forEach((edge, index) => {
-          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
-          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
-          if (edge.details && edge.details.length > 0) {
-            log(`    Details: ${edge.details.join(', ')}`);
-          }
-        });
-      } else {
-        log(`No edges found from regex parsing`);
-      }
-
       // --- CST-based Edge Detection ---
       log(`========================================`);
       log(`STARTING CST-BASED EDGE DETECTION`);
@@ -389,69 +399,33 @@ export function activate(context: vscode.ExtensionContext) {
         log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
       });
 
-      // Combine edges from both methods with deduplication to prevent overlap
-      log(`========================================`);
-      log(`COMBINING EDGES WITH DEDUPLICATION`);
-      log(`========================================`);
+      // Aggregate CST edges to consolidate multiple method calls between the same components
+      const aggregatedCstEdges = aggregateCstEdges(cstEdges);
+      log(`CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
 
-      // Create a Set to track unique edges and prevent overlap
-      const uniqueEdges = new Map<string, AkkaEdge>();
-
-      // Helper function to create a unique key for an edge
-      const createEdgeKey = (edge: AkkaEdge): string => {
-        return `${edge.source}->${edge.target}->${edge.label}`;
-      };
-
-      // Add regex edges first
-      log(`Adding ${aggregatedEdges.length} regex edges to unique set`);
-      aggregatedEdges.forEach((edge, index) => {
-        const key = createEdgeKey(edge);
-        if (!uniqueEdges.has(key)) {
-          uniqueEdges.set(key, edge);
-          log(`  Added regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
-        } else {
-          log(`  Skipped duplicate regex edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
-        }
-      });
-
-      // Add CST edges, but skip if already present from regex
-      log(`Adding ${cstEdges.length} CST edges to unique set (skipping duplicates)`);
-      cstEdges.forEach((edge, index) => {
-        const key = createEdgeKey(edge);
-        if (!uniqueEdges.has(key)) {
-          uniqueEdges.set(key, edge);
-          log(`  Added CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+      if (aggregatedCstEdges.length > 0) {
+        log(`Aggregated CST edges:`);
+        aggregatedCstEdges.forEach((edge: AkkaEdge, index: number) => {
+          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
+          log(`  Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
             log(`    Method names: ${edge.details.join(', ')}`);
           }
-        } else {
-          log(`  Skipped duplicate CST edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label}) - already found by regex`);
-        }
-      });
+        });
+      }
 
-      const allEdges = Array.from(uniqueEdges.values());
-      log(`Deduplication complete. Final unique edges: ${allEdges.length} (${aggregatedEdges.length} from regex + ${cstEdges.length} from CST, with duplicates removed)`);
-
-      // Log all final unique edges
-      if (allEdges.length > 0) {
-        log(`Final unique edges found:`);
-        log(`Final unique edges found (${allEdges.length}):`);
-        allEdges.forEach((edge, index) => {
-          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})`);
+      // Log all final edges
+      if (aggregatedCstEdges.length > 0) {
+        log(`Final edges found (${aggregatedCstEdges.length}):`);
+        aggregatedCstEdges.forEach((edge: AkkaEdge, index: number) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
           log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
-            log(`    Details: ${edge.details.join(', ')}`);
-            // Add specific logging for method names
-            if (edge.details.length > 0) {
-              log(`    Method names: ${edge.details.join(', ')}`);
-            }
+            log(`    Method names: ${edge.details.join(', ')}`);
           }
         });
-        log(`Final unique edges ===== end edge lists. `);
-        log(`Final unique edges ===== end edge lists. `);
+        log(`Final edges ===== end edge lists. `);
       } else {
-        log(`No edges found in the project`);
         log(`No edges found in the project`);
       }
 
@@ -459,7 +433,15 @@ export function activate(context: vscode.ExtensionContext) {
       const savedNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaDiagramLayout', {});
       const savedViewState = context.workspaceState.get<ViewState>('akkaDiagramViewState', { panX: 0, panY: 0, scale: 1 });
 
-      const nodesWithLayout = Array.from(parsedNodes.values()).map((node) => ({
+      // Convert CST components to AkkaComponent format
+      const cstNodes: AkkaComponent[] = allAkkaComponents.map((component) => ({
+        id: component.className,
+        name: component.componentId || component.className,
+        type: component.componentType,
+        uri: vscode.Uri.file(component.filename),
+      }));
+
+      const nodesWithLayout = cstNodes.map((node) => ({
         ...node,
         ...savedNodeLayout[node.id], // Apply saved coordinates if they exist
       }));
@@ -483,7 +465,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Combine regular nodes, topic nodes, and service stream nodes
       const allNodes = [...nodesWithLayout, ...topicComponents, ...serviceStreamComponents];
 
-      const diagramData = { nodes: allNodes, edges: allEdges };
+      const diagramData = { nodes: allNodes, edges: aggregatedCstEdges };
 
       // --- Create the Webview Panel ---
       if (diagramData.nodes.length > 0) {
@@ -755,12 +737,12 @@ export function activate(context: vscode.ExtensionContext) {
       const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents, ...cstServiceStreamComponents];
 
       // Aggregate CST edges to consolidate multiple method calls between the same components
-      const aggregatedCstEdges = aggregateEdges(cstEdges);
+      const aggregatedCstEdges = aggregateCstEdges(cstEdges);
       log(`CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
 
       if (aggregatedCstEdges.length > 0) {
         log(`Aggregated CST edges:`);
-        aggregatedCstEdges.forEach((edge, index) => {
+        aggregatedCstEdges.forEach((edge: AkkaEdge, index: number) => {
           let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
           log(`  Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
           if (edge.details && edge.details.length > 0) {
