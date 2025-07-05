@@ -46,6 +46,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     label: string;
     details: string[];
   }> = [];
+  const topicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
 
   // Helper: get class name
   function getClassName(classDecl: any): string | undefined {
@@ -435,6 +436,83 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     return annotations;
   }
 
+  // Helper: extract topic annotations from annotations list
+  function extractTopicAnnotationsFromList(annotations: Array<{ annotation: any; className: string }>) {
+    for (const { annotation, className } of annotations) {
+      // Use the annotation location to extract the full annotation text
+      if (annotation.location && annotation.location.startOffset !== undefined && annotation.location.endOffset !== undefined) {
+        log(`Annotation location: ${annotation.location.startOffset} to ${annotation.location.endOffset}`);
+
+        if (sourceText) {
+          const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+          log(`Annotation text: "${annotationText}"`);
+
+          // Check for @Produce.ToTopic and @Consume.FromTopic annotations
+          if (annotationText.startsWith('@Produce.ToTopic') || annotationText.startsWith('@Consume.FromTopic')) {
+            log(`Found topic annotation in class: ${className}`);
+
+            // Parse both @Produce.ToTopic("topic-name") and @Produce.ToTopic(value = "topic-name", ...) formats
+            // Also handle @Consume.FromTopic("topic-name") and @Consume.FromTopic(value = "topic-name", ...) formats
+            let topicMatch = annotationText.match(/@(Produce|Consume)\.(To|From)Topic\("([^"]+)"\)/);
+
+            if (!topicMatch) {
+              // Try named parameter format: value = "topic-name"
+              topicMatch = annotationText.match(/@(Produce|Consume)\.(To|From)Topic\s*\(\s*value\s*=\s*"([^"]+)"[^)]*\)/);
+            }
+
+            if (topicMatch) {
+              const action = topicMatch[1]; // "Produce" or "Consume"
+              const direction = topicMatch[2]; // "To" or "From"
+              const topicName = topicMatch[3]; // The topic name
+
+              log(`Found topic annotation - Action: ${action}, Direction: ${direction}, Topic: ${topicName}`);
+
+              // Create topic node if it doesn't exist
+              const topicId = `topic:${topicName}`;
+              const existingTopic = topicNodes.find((t) => t.id === topicId);
+              if (!existingTopic) {
+                topicNodes.push({
+                  id: topicId,
+                  name: topicName,
+                  type: 'Topic',
+                  uri: vscode.Uri.file(filename),
+                });
+                log(`Created topic node: ${topicId}`);
+              }
+
+              // Create connection between component and topic
+              if (action === 'Produce') {
+                // Component produces to topic
+                connections.push({
+                  source: className,
+                  target: topicId,
+                  label: 'produces to',
+                  details: [],
+                });
+                log(`Created connection: ${className} -> ${topicId} (produces to)`);
+              } else if (action === 'Consume') {
+                // Component consumes from topic
+                connections.push({
+                  source: topicId,
+                  target: className,
+                  label: 'consumes from',
+                  details: [],
+                });
+                log(`Created connection: ${topicId} -> ${className} (consumes from)`);
+              }
+            } else {
+              log(`Could not parse topic annotation: "${annotationText}"`);
+            }
+          }
+        } else {
+          log(`No source text provided, cannot extract annotation`);
+        }
+      } else {
+        log(`No location information available for annotation`);
+      }
+    }
+  }
+
   // Helper: extract consume annotations from annotations list
   function extractConsumeAnnotationsFromList(annotations: Array<{ annotation: any; className: string }>) {
     for (const { annotation, className } of annotations) {
@@ -523,11 +601,12 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     });
   }
 
-  // Extract all annotations and process consume annotations
+  // Extract all annotations and process consume and topic annotations
   log(`Extracting all annotations from CST...`);
   const allAnnotations = extractAllAnnotations(cst);
   log(`Found ${allAnnotations.length} total annotations`);
   extractConsumeAnnotationsFromList(allAnnotations);
+  extractTopicAnnotationsFromList(allAnnotations);
 
-  return connections;
+  return { connections, topicNodes };
 }

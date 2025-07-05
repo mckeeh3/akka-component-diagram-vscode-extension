@@ -309,7 +309,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -353,6 +353,28 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         log(`No edges found from CST-based detection`);
       }
+
+      // Collect all topic nodes from all files (scanProject command)
+      const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      for (const result of successfulParses) {
+        if (result.cst) {
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+          const { topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+
+          // Add topic nodes to the global collection (avoiding duplicates)
+          topicNodes.forEach((topic) => {
+            if (!allTopicNodes.find((t) => t.id === topic.id)) {
+              allTopicNodes.push(topic);
+            }
+          });
+        }
+      }
+
+      log(`Found ${allTopicNodes.length} unique topic nodes across all files`);
+      allTopicNodes.forEach((topic, index) => {
+        log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
+      });
 
       // Combine edges from both methods with deduplication to prevent overlap
       log(`========================================`);
@@ -429,7 +451,18 @@ export function activate(context: vscode.ExtensionContext) {
         ...savedNodeLayout[node.id], // Apply saved coordinates if they exist
       }));
 
-      const diagramData = { nodes: nodesWithLayout, edges: allEdges };
+      // Convert topic nodes to AkkaComponent format and add to diagram
+      const topicComponents: AkkaComponent[] = allTopicNodes.map((topic) => ({
+        id: topic.id,
+        name: topic.name,
+        type: topic.type,
+        uri: topic.uri,
+      }));
+
+      // Combine regular nodes and topic nodes
+      const allNodes = [...nodesWithLayout, ...topicComponents];
+
+      const diagramData = { nodes: allNodes, edges: allEdges };
 
       // --- Create the Webview Panel ---
       if (diagramData.nodes.length > 0) {
@@ -584,7 +617,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const connections = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -629,6 +662,28 @@ export function activate(context: vscode.ExtensionContext) {
         log(`No edges found from CST-based detection`);
       }
 
+      // Collect all topic nodes from all files (generateCstDiagram command)
+      const allCstTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      for (const result of successfulParses) {
+        if (result.cst) {
+          const document = await vscode.workspace.openTextDocument(result.filename);
+          const sourceText = document.getText();
+          const { topicNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+
+          // Add topic nodes to the global collection (avoiding duplicates)
+          topicNodes.forEach((topic) => {
+            if (!allCstTopicNodes.find((t) => t.id === topic.id)) {
+              allCstTopicNodes.push(topic);
+            }
+          });
+        }
+      }
+
+      log(`Found ${allCstTopicNodes.length} unique topic nodes across all files`);
+      allCstTopicNodes.forEach((topic, index) => {
+        log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
+      });
+
       // Convert CST components to AkkaComponent format
       const cstNodes: AkkaComponent[] = allAkkaComponents.map((component) => ({
         id: component.className,
@@ -646,6 +701,17 @@ export function activate(context: vscode.ExtensionContext) {
         ...savedCstNodeLayout[node.id], // Apply saved coordinates if they exist
       }));
 
+      // Convert topic nodes to AkkaComponent format and add to CST diagram
+      const cstTopicComponents: AkkaComponent[] = allCstTopicNodes.map((topic) => ({
+        id: topic.id,
+        name: topic.name,
+        type: topic.type,
+        uri: topic.uri,
+      }));
+
+      // Combine regular nodes and topic nodes
+      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents];
+
       // Aggregate CST edges to consolidate multiple method calls between the same components
       const aggregatedCstEdges = aggregateEdges(cstEdges);
       log(`CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
@@ -661,7 +727,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
       }
 
-      const cstDiagramData = { nodes: cstNodesWithLayout, edges: aggregatedCstEdges };
+      const cstDiagramData = { nodes: allCstNodes, edges: aggregatedCstEdges };
 
       // --- Create the CST Webview Panel ---
       if (cstDiagramData.nodes.length > 0) {
