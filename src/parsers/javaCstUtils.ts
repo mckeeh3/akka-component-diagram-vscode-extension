@@ -73,164 +73,104 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     for (const bodyDecl of classBodyDecls) {
       if (bodyDecl.children && bodyDecl.children.constructorDeclaration) {
         const ctor = bodyDecl.children.constructorDeclaration[0];
+        log(`Found constructor, checking parameters...`);
+
         // Find parameters
         if (ctor.children.constructorDeclarator && ctor.children.constructorDeclarator[0].children.formalParameterList) {
           const params = ctor.children.constructorDeclarator[0].children.formalParameterList[0];
           if (params.children.formalParameter) {
+            log(`Found ${params.children.formalParameter.length} constructor parameters`);
+
             for (const param of params.children.formalParameter) {
-              // Look for type ComponentClient - updated path based on debug output
-              if (
-                param.children &&
-                param.children.variableParaRegularParameter &&
-                param.children.variableParaRegularParameter[0].children.unannType &&
-                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType &&
-                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType &&
-                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType &&
-                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType[0].children
-                  .Identifier &&
-                param.children.variableParaRegularParameter[0].children.unannType[0].children.unannReferenceType[0].children.unannClassOrInterfaceType[0].children.unannClassType[0].children.Identifier[0].image.includes(
-                  'ComponentClient'
-                )
-              ) {
+              log(`Checking parameter: ${JSON.stringify(Object.keys(param.children || {}))}`);
+
+              // Look for type ComponentClient - simplified path checking
+              let isComponentClient = false;
+              let paramName = '';
+
+              // Check if this parameter is of type ComponentClient
+              if (param.children && param.children.variableParaRegularParameter) {
+                const varParam = param.children.variableParaRegularParameter[0];
+
                 // Get parameter name
-                if (
-                  param.children.variableParaRegularParameter[0].children.variableDeclaratorId &&
-                  param.children.variableParaRegularParameter[0].children.variableDeclaratorId[0].children.Identifier
-                ) {
-                  const paramName = param.children.variableParaRegularParameter[0].children.variableDeclaratorId[0].children.Identifier[0].image;
-                  // Now, look for assignments in the constructor body: this.FIELD = paramName;
-                  if (ctor.children.constructorBody && ctor.children.constructorBody[0].children.blockStatements) {
-                    for (const blockStmt of ctor.children.constructorBody[0].children.blockStatements) {
-                      if (
-                        blockStmt.children &&
-                        blockStmt.children.blockStatement &&
-                        blockStmt.children.blockStatement[0].children.statement &&
-                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement &&
-                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement &&
-                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression &&
-                        blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression[0]
-                          .children.expression
-                      ) {
-                        const expr =
-                          blockStmt.children.blockStatement[0].children.statement[0].children.statementWithoutTrailingSubstatement[0].children.expressionStatement[0].children.statementExpression[0]
-                            .children.expression[0];
+                if (varParam.children && varParam.children.variableDeclaratorId && varParam.children.variableDeclaratorId[0].children.Identifier) {
+                  paramName = varParam.children.variableDeclaratorId[0].children.Identifier[0].image;
+                  log(`Parameter name: ${paramName}`);
+                }
 
-                        // Look deeper into the expression structure
-                        if (expr.children.conditionalExpression) {
-                          const condExpr = expr.children.conditionalExpression[0];
+                // Check type - simplified path
+                if (varParam.children && varParam.children.unannType) {
+                  const unannType = varParam.children.unannType[0];
 
-                          if (condExpr.children.binaryExpression) {
-                            const binExpr = condExpr.children.binaryExpression[0];
+                  // Try multiple paths to find the type name
+                  let typeName = '';
 
-                            if (binExpr.children.unaryExpression) {
-                              const unaryExpr = binExpr.children.unaryExpression[0];
+                  // Path 1: unannReferenceType -> unannClassOrInterfaceType -> unannClassType -> Identifier
+                  if (unannType.children && unannType.children.unannReferenceType) {
+                    const refType = unannType.children.unannReferenceType[0];
+                    if (refType.children && refType.children.unannClassOrInterfaceType) {
+                      const classType = refType.children.unannClassOrInterfaceType[0];
+                      if (classType.children && classType.children.unannClassType) {
+                        const classTypeNode = classType.children.unannClassType[0];
+                        if (classTypeNode.children && classTypeNode.children.Identifier) {
+                          typeName = classTypeNode.children.Identifier[0].image;
+                        }
+                      }
+                    }
+                  }
 
-                              if (unaryExpr.children.primary) {
-                                const primary = unaryExpr.children.primary[0];
-
-                                if (primary.children.primaryPrefix) {
-                                  const prefix = primary.children.primaryPrefix[0];
-
-                                  if (prefix.children.This) {
-                                    // Found 'this'
-                                  }
-                                }
-
-                                if (primary.children.primarySuffix) {
-                                  const suffix = primary.children.primarySuffix[0];
-
-                                  if (suffix.children.Identifier) {
-                                    const fieldName = suffix.children.Identifier[0].image;
-                                  }
-                                }
-                              }
-                            }
-
-                            if (binExpr.children.AssignmentOperator) {
-                              const assignOp = binExpr.children.AssignmentOperator[0];
-                            }
-
-                            if (binExpr.children.expression) {
-                              const rhs = binExpr.children.expression[0];
-
-                              // Look deeper into RHS to find the variable name
-                              if (rhs.children.conditionalExpression) {
-                                const rhsCond = rhs.children.conditionalExpression[0];
-
-                                if (rhsCond.children.binaryExpression) {
-                                  const rhsBin = rhsCond.children.binaryExpression[0];
-
-                                  if (rhsBin.children.unaryExpression) {
-                                    const rhsUnary = rhsBin.children.unaryExpression[0];
-
-                                    if (rhsUnary.children.primary && rhsUnary.children.primary[0].children.primaryPrefix) {
-                                      const prefix = rhsUnary.children.primary[0].children.primaryPrefix[0];
-
-                                      if (prefix.children.Identifier) {
-                                        const varName = prefix.children.Identifier[0].image;
-                                      }
-
-                                      if (prefix.children.fqnOrRefType) {
-                                        const fqn = prefix.children.fqnOrRefType[0];
-
-                                        if (fqn.children && fqn.children.fqnOrRefTypePartFirst) {
-                                          const partFirst = fqn.children.fqnOrRefTypePartFirst[0];
-
-                                          if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
-                                            const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
-                                            if (partCommon.children && partCommon.children.Identifier) {
-                                              const varName = partFirst.children.fqnOrRefTypePartCommon[0].children.Identifier[0].image;
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
+                  // Path 2: unannReferenceType -> fqnOrRefType (for fully qualified names)
+                  if (!typeName && unannType.children && unannType.children.unannReferenceType) {
+                    const refType = unannType.children.unannReferenceType[0];
+                    if (refType.children && refType.children.fqnOrRefType) {
+                      const fqnType = refType.children.fqnOrRefType[0];
+                      // Extract the last part of the FQN
+                      if (fqnType.children && fqnType.children.fqnOrRefTypePartFirst) {
+                        const partFirst = fqnType.children.fqnOrRefTypePartFirst[0];
+                        if (partFirst.children && partFirst.children.fqnOrRefTypePartCommon) {
+                          const partCommon = partFirst.children.fqnOrRefTypePartCommon[0];
+                          if (partCommon.children && partCommon.children.Identifier) {
+                            typeName = partCommon.children.Identifier[0].image;
                           }
                         }
+                      }
+                    }
+                  }
 
-                        // Check if this is an assignment: this.FIELD = paramName
-                        if (
-                          expr.children.conditionalExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primaryPrefix &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.This &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier[0].image &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.AssignmentOperator &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon[0].children
-                            .Identifier &&
-                          expr.children.conditionalExpression[0].children.binaryExpression[0].children.expression[0].children.conditionalExpression[0].children.binaryExpression[0].children
-                            .unaryExpression[0].children.primary[0].children.primaryPrefix[0].children.fqnOrRefType[0].children.fqnOrRefTypePartFirst[0].children.fqnOrRefTypePartCommon[0].children
-                            .Identifier[0].image === paramName
-                        ) {
-                          // The field assigned is:
-                          const fieldName =
-                            expr.children.conditionalExpression[0].children.binaryExpression[0].children.unaryExpression[0].children.primary[0].children.primarySuffix[0].children.Identifier[0].image;
-                          fieldNames.push(fieldName);
-                          log(`Found ComponentClient field assignment: ${fieldName} = ${paramName}`);
+                  log(`Parameter type: ${typeName}`);
+                  isComponentClient = typeName.includes('ComponentClient');
+                }
+              }
+
+              if (isComponentClient && paramName) {
+                log(`Found ComponentClient parameter: ${paramName}`);
+
+                // Now, look for assignments in the constructor body: this.FIELD = paramName;
+                if (ctor.children.constructorBody && ctor.children.constructorBody[0].children.blockStatements) {
+                  log(`Checking constructor body for field assignments...`);
+
+                  for (const blockStmt of ctor.children.constructorBody[0].children.blockStatements) {
+                    if (blockStmt.children && blockStmt.children.blockStatement) {
+                      for (const stmt of blockStmt.children.blockStatement) {
+                        // Look for assignment statements: this.fieldName = paramName;
+                        if (stmt.children && stmt.children.statement) {
+                          const statement = stmt.children.statement[0];
+
+                          // Extract assignment using source text if available
+                          if (statement.location && sourceText) {
+                            const stmtText = extractSourceAtLocation(sourceText, statement.location);
+                            log(`Statement text: "${stmtText}"`);
+
+                            // Look for pattern: this.fieldName = paramName;
+                            const assignmentPattern = new RegExp(`this\\.(\\w+)\\s*=\\s*${paramName}\\s*;?`);
+                            const match = stmtText.match(assignmentPattern);
+
+                            if (match) {
+                              const fieldName = match[1];
+                              fieldNames.push(fieldName);
+                              log(`Found ComponentClient field assignment: ${fieldName} = ${paramName}`);
+                            }
+                          }
                         }
                       }
                     }
@@ -245,7 +185,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
 
     // Fallback: if no field names found, try to find any field that might be a ComponentClient
     if (fieldNames.length === 0) {
-      log(`No ComponentClient field names found with complex detection, trying fallback...`);
+      log(`No ComponentClient field names found with constructor detection, trying fallback...`);
       for (const bodyDecl of classBodyDecls) {
         if (bodyDecl.children && bodyDecl.children.fieldDeclaration) {
           const fieldDecl = bodyDecl.children.fieldDeclaration[0];
@@ -285,7 +225,11 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
       }
     }
 
-    log(`ComponentClient field names found: ${fieldNames.join(', ')}`);
+    if (fieldNames.length > 0) {
+      log(`ComponentClient field names found: ${fieldNames.join(', ')}`);
+    } else {
+      log(`No ComponentClient field names found`);
+    }
     return fieldNames;
   }
 
@@ -373,7 +317,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                       // Find the pattern: starts with for*, contains method, ends with invoke
                       const hasForMethod = chain.some((method) => method.startsWith('for') || method === 'forView' || method === 'forEventSourcedEntity');
                       const hasMethodCall = chain.includes('method');
-                      const hasInvokeCall = chain.some((method) => method === 'invoke' || method === 'invokeAsync');
+                      const hasInvokeCall = chain.some((method) => method === 'invoke' || method === 'invokeAsync' || method === 'deferred');
 
                       if (hasForMethod && hasMethodCall && hasInvokeCall) {
                         log(`Found valid chain pattern: ${chain.join(' -> ')}`);
@@ -818,7 +762,11 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
         if (classDecl.children.normalClassDeclaration[0].children.classBody && classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration) {
           const classBodyDecls = classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration;
           const clientFieldNames = findComponentClientFieldNames(classBodyDecls);
-          log(`Found ComponentClient field names in ${className}: ${clientFieldNames.join(', ')}`);
+          if (clientFieldNames.length > 0) {
+            log(`Found ComponentClient field names in ${className}: ${clientFieldNames.join(', ')}`);
+          } else {
+            log(`No ComponentClient field names found in ${className}`);
+          }
 
           classBodyDecls.forEach((bodyDecl: any) => {
             if (bodyDecl.children && bodyDecl.children.classMemberDeclaration && bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration) {
