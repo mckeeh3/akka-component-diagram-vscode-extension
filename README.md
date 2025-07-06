@@ -93,6 +93,25 @@ The generated Mermaid diagram includes:
 
 You can then use any Mermaid-compatible viewer or renderer to display the diagram.
 
+### **Viewing Mermaid Diagrams**
+
+To view the generated Mermaid diagrams in VSCode, you can use these extensions:
+
+* **Markdown Preview Mermaid Support**: Enables Mermaid diagram rendering in VSCode's built-in markdown preview
+* **Mermaid Preview**: Dedicated extension for viewing Mermaid diagrams
+* **Markdown All in One**: Includes Mermaid support along with other markdown features
+
+**Installation:**
+1. Open VSCode Extensions view (`Ctrl+Shift+X`)
+2. Search for "Markdown Preview Mermaid Support"
+3. Install the extension
+4. Open your generated markdown file
+5. Use `Ctrl+Shift+V` to open the markdown preview
+
+The diagrams will render automatically in the preview pane, showing your Akka component relationships with the configured theme and styling.
+
+
+
 ## **Configuration**
 
 The extension supports the following configuration options:
