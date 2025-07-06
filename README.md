@@ -147,3 +147,13 @@ The CST-based approach provides more accurate detection compared to regex-based 
 ## **License**
 
 This extension is open source and available under the [MIT License](http://docs.google.com/LICENSE.md).
+
+## Example Diagram Gallery
+
+![diagram](example-component-diagram-1.png)
+
+![diagram](example-component-diagram-2.png)
+
+![diagram](example-component-diagram-3.png)
+
+![diagram](example-component-diagram-4.png)
