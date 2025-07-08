@@ -48,6 +48,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
   }> = [];
   const topicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
   const serviceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+  const toolNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
 
   // Helper: get class name
   function getClassName(classDecl: any): string | undefined {
@@ -233,6 +234,70 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     return fieldNames;
   }
 
+  // Helper: find function tool invocations in method bodies
+  function findFunctionToolInvocations(blockStmt: any, className: string) {
+    if (!blockStmt || !blockStmt.children) return;
+
+    function searchForToolInvocations(node: any) {
+      if (!node || typeof node !== 'object') return;
+
+      if (node.children) {
+        for (const [key, children] of Object.entries(node.children)) {
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              if (child && typeof child === 'object') {
+                // Look for primary nodes that could be the start of a tool invocation chain
+                if (key === 'primary') {
+                  const primary = child;
+                  if (primary.location && sourceText) {
+                    const chainText = extractSourceAtLocation(sourceText, primary.location);
+
+                    // Look for .tools() and .mcpTools() invocations
+                    const toolsMatch = chainText.match(/\.tools\(([^)]+)\)/);
+                    const mcpToolsMatch = chainText.match(/\.mcpTools\(([^)]+)\)/);
+
+                    if (toolsMatch) {
+                      const toolArgs = toolsMatch[1].split(',').map((arg) => arg.trim());
+                      for (const arg of toolArgs) {
+                        const toolName = arg.replace(/\.class$/, '');
+                        const toolId = `tool:${toolName}`;
+                        if (!toolNodes.find((t) => t.id === toolId)) {
+                          toolNodes.push({ id: toolId, name: toolName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                        }
+                        connections.push({ source: className, target: toolId, label: 'uses tool', details: [] });
+                      }
+                    }
+
+                    if (mcpToolsMatch) {
+                      const mcpToolArgs = mcpToolsMatch[1].split(',').map((arg) => arg.trim());
+                      for (const arg of mcpToolArgs) {
+                        const serviceNameMatch = arg.match(/fromService\("([^"]+)"\)/);
+                        if (serviceNameMatch) {
+                          const serviceName = serviceNameMatch[1];
+                          const toolId = `mcp-tool:${serviceName}`;
+                          if (!toolNodes.find((t) => t.id === toolId)) {
+                            toolNodes.push({ id: toolId, name: serviceName, type: 'MCPTool', uri: vscode.Uri.file(filename) });
+                          }
+                          connections.push({ source: className, target: toolId, label: 'uses MCP tool', details: [] });
+                        }
+                      }
+                    }
+                  }
+                }
+                // Recurse deeper
+                searchForToolInvocations(child);
+              }
+            }
+          } else if (children && typeof children === 'object') {
+            searchForToolInvocations(children);
+          }
+        }
+      }
+    }
+
+    searchForToolInvocations(blockStmt);
+  }
+
   // Helper: find componentClient invocation chains in method bodies
   function findComponentClientChains(blockStmt: any, className: string, clientFieldNames: string[]) {
     if (!blockStmt || !blockStmt.children) return;
@@ -403,8 +468,6 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                                 } else {
                                   log(`No source text provided, cannot extract method name`);
                                 }
-                              } else {
-                                log(`No location information available for method invocation`);
                               }
                             } else {
                               log(`No expression found in argument list`);
@@ -431,27 +494,6 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                                       }
                                     }
                                   }
-                                }
-                              }
-                            }
-                          } else {
-                            log(`No argument list found in method invocation`);
-                            // Try to extract method parameter from the method invocation itself
-                            if (methodInv.location && sourceText) {
-                              const methodInvText = extractSourceAtLocation(sourceText, methodInv.location);
-                              log(`Method invocation text: "${methodInvText}"`);
-
-                              // Try to extract the argument from the method invocation text
-                              const argMatch = methodInvText.match(/\(([^)]+)\)/);
-                              if (argMatch) {
-                                const argText = argMatch[1];
-                                log(`Extracted argument text: "${argText}"`);
-
-                                const parts = argText.split('::');
-                                if (parts.length === 2) {
-                                  targetComponentType = parts[0];
-                                  calledMethodName = parts[1];
-                                  log(`Extracted from method invocation text - Class: ${targetComponentType}, Method: ${calledMethodName}`);
                                 }
                               }
                             }
@@ -494,6 +536,37 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     }
 
     searchForClientChains(blockStmt);
+  }
+
+  // Helper: find methods annotated with @FunctionTool
+  function findFunctionToolAnnotations(classBodyDecls: any[], className: string) {
+    for (const bodyDecl of classBodyDecls) {
+      if (bodyDecl.children && bodyDecl.children.classMemberDeclaration) {
+        const memberDecl = bodyDecl.children.classMemberDeclaration[0];
+        if (memberDecl.children && memberDecl.children.methodDeclaration) {
+          const methodDecl = memberDecl.children.methodDeclaration[0];
+          if (methodDecl.children && methodDecl.children.methodModifier) {
+            for (const modifier of methodDecl.children.methodModifier) {
+              if (modifier.children && modifier.children.annotation) {
+                for (const annotation of modifier.children.annotation) {
+                  if (annotation.location && sourceText) {
+                    const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+                    if (annotationText.startsWith('@FunctionTool')) {
+                      const methodName = methodDecl.children.methodHeader[0].children.methodDeclarator[0].children.Identifier[0].image;
+                      const toolId = `tool:${className}.${methodName}`;
+                      if (!toolNodes.find((t) => t.id === toolId)) {
+                        toolNodes.push({ id: toolId, name: methodName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                      }
+                      connections.push({ source: className, target: toolId, label: 'defines tool', details: [] });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // Helper: extract all annotations from CST
@@ -684,8 +757,6 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
               log(`Created connection: ${streamId} -> ${className} (consumes from)`);
             }
           }
-        } else {
-          log(`No source text provided, cannot extract annotation`);
         }
       } else {
         log(`No location information available for annotation`);
@@ -734,7 +805,13 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
               }
 
               // Create connection from source class to current class
-              const detailLabel = consumeType === 'Topic' || consumeType === 'ServiceStream' ? 'consumes' : `${consumeType} events`;
+              let detailLabel: string;
+              if (consumeType === 'Topic' || consumeType === 'ServiceStream') {
+                detailLabel = `${consumeType} messages`;
+              } else {
+                detailLabel = `${consumeType} events`;
+              }
+
               connections.push({
                 source: sourceClass,
                 target: className,
@@ -745,8 +822,6 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
               log(`Could not parse consume annotation: "${annotationText}"`);
             }
           }
-        } else {
-          log(`No source text provided, cannot extract annotation`);
         }
       } else {
         log(`No location information available for annotation`);
@@ -768,6 +843,10 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
             log(`No ComponentClient field names found in ${className}`);
           }
 
+          if (className) {
+            findFunctionToolAnnotations(classBodyDecls, className);
+          }
+
           classBodyDecls.forEach((bodyDecl: any) => {
             if (bodyDecl.children && bodyDecl.children.classMemberDeclaration && bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration) {
               const methodDecl = bodyDecl.children.classMemberDeclaration[0].children.methodDeclaration[0];
@@ -775,6 +854,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                 if (className) {
                   methodDecl.children.methodBody[0].children.block[0].children.blockStatements.forEach((blockStmt: any) => {
                     findComponentClientChains(blockStmt, className, clientFieldNames);
+                    findFunctionToolInvocations(blockStmt, className);
                   });
                 }
               }
@@ -793,5 +873,5 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
   extractTopicAnnotationsFromList(allAnnotations);
   extractServiceStreamAnnotationsFromList(allAnnotations);
 
-  return { connections, topicNodes, serviceStreamNodes };
+  return { connections, topicNodes, serviceStreamNodes, toolNodes };
 }

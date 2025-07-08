@@ -2,7 +2,7 @@
   "name": "akka-diagram-generator",
   "displayName": "Akka Component Diagram Generator",
   "description": "Scans Java source code to generate Akka component diagrams.",
-  "version": "v0.0.10",
+  "version": "v0.0.11",
   "engines": {
     "vscode": "^1.85.0"
   },

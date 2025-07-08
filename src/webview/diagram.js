@@ -31,16 +31,19 @@ const ctx = canvas.getContext('2d');
 const componentColors = {
   httpEndpoint: 'bg-purple-600',
   grpcEndpoint: 'bg-indigo-600',
+  mcpEndpoint: 'bg-cyan-600',
   eventSourcedEntity: 'bg-green-600',
   keyValueEntity: 'bg-emerald-600',
   view: 'bg-blue-600',
   consumer: 'bg-yellow-600',
   workflow: 'bg-orange-600',
   timedAction: 'bg-rose-600',
-  agent: 'bg-pink-600',
+  agent: 'bg-fuchsia-600',
   topic: 'bg-slate-500',
   serviceStream: 'bg-byzanthium',
-  unknown: 'bg-sky-700',
+  functionTool: 'bg-fuchsia-900',
+  mcpTool: 'bg-cyan-900',
+  unknown: 'bg-gray-700',
 };
 
 // Initialize the diagram

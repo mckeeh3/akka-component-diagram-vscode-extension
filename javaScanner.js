@@ -40,7 +40,7 @@ function logNodeInfo(node, sourceCode, depth = 0, filePath) {
   }
   logger.debug(`${prefix} ${value}`, nodeMetadata);
   const startLine = node.location?.startLine || node.startLine;
-  if (startLine === 52) {
+  if (startLine !== undefined && startLine === 52) {
     debugger;
   }
 

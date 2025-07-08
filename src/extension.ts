@@ -313,6 +313,9 @@ export function activate(context: vscode.ExtensionContext) {
       log(`========================================`);
       log(`Starting CST-based edge detection...`);
       const cstEdges: AkkaEdge[] = [];
+      const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allToolNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
 
       for (const result of successfulParses) {
         if (result.cst) {
@@ -320,7 +323,12 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
+            result.cst,
+            result.filename,
+            sourceText,
+            outputChannel,
+          );
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -346,6 +354,27 @@ export function activate(context: vscode.ExtensionContext) {
           } else {
             log(`  No connections found in ${path.basename(result.filename)}`);
           }
+
+          // Add topic nodes to the global collection (avoiding duplicates)
+          topicNodes.forEach((topic) => {
+            if (!allTopicNodes.find((t) => t.id === topic.id)) {
+              allTopicNodes.push(topic);
+            }
+          });
+
+          // Add service stream nodes to the global collection (avoiding duplicates)
+          serviceStreamNodes.forEach((stream: { id: string; name: string; type: string; uri: vscode.Uri }) => {
+            if (!allServiceStreamNodes.find((s) => s.id === stream.id)) {
+              allServiceStreamNodes.push(stream);
+            }
+          });
+
+          // Add tool nodes to the global collection (avoiding duplicates)
+          toolNodes.forEach((tool) => {
+            if (!allToolNodes.find((t) => t.id === tool.id)) {
+              allToolNodes.push(tool);
+            }
+          });
         }
       }
 
@@ -365,39 +394,19 @@ export function activate(context: vscode.ExtensionContext) {
         log(`No edges found from CST-based detection`);
       }
 
-      // Collect all topic nodes from all files (scanProject command)
-      const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      const allServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      for (const result of successfulParses) {
-        if (result.cst) {
-          const document = await vscode.workspace.openTextDocument(result.filename);
-          const sourceText = document.getText();
-          const { topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
-
-          // Add topic nodes to the global collection (avoiding duplicates)
-          topicNodes.forEach((topic) => {
-            if (!allTopicNodes.find((t) => t.id === topic.id)) {
-              allTopicNodes.push(topic);
-            }
-          });
-
-          // Add service stream nodes to the global collection (avoiding duplicates)
-          serviceStreamNodes.forEach((stream) => {
-            if (!allServiceStreamNodes.find((s) => s.id === stream.id)) {
-              allServiceStreamNodes.push(stream);
-            }
-          });
-        }
-      }
-
       log(`Found ${allTopicNodes.length} unique topic nodes across all files`);
       allTopicNodes.forEach((topic, index) => {
         log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
       });
 
       log(`Found ${allServiceStreamNodes.length} unique service stream nodes across all files`);
-      allServiceStreamNodes.forEach((stream, index) => {
+      allServiceStreamNodes.forEach((stream: any, index) => {
         log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
+      });
+
+      log(`Found ${allToolNodes.length} unique tool nodes across all files`);
+      allToolNodes.forEach((tool, index) => {
+        log(`  Tool ${index + 1}: ${tool.id} (${tool.name}) - ${tool.type}`);
       });
 
       // Aggregate CST edges to consolidate multiple method calls between the same components
@@ -463,8 +472,16 @@ export function activate(context: vscode.ExtensionContext) {
         uri: stream.uri,
       }));
 
-      // Combine regular nodes, topic nodes, and service stream nodes
-      const allNodes = [...nodesWithLayout, ...topicComponents, ...serviceStreamComponents];
+      // Convert tool nodes to AkkaComponent format and add to diagram
+      const toolComponents: AkkaComponent[] = allToolNodes.map((tool) => ({
+        id: tool.id,
+        name: tool.name,
+        type: tool.type,
+        uri: tool.uri,
+      }));
+
+      // Combine regular nodes, topic nodes, service stream nodes, and tool nodes
+      const allNodes = [...nodesWithLayout, ...topicComponents, ...serviceStreamComponents, ...toolComponents];
 
       const diagramData = { nodes: allNodes, edges: aggregatedCstEdges };
 
@@ -614,6 +631,9 @@ export function activate(context: vscode.ExtensionContext) {
       log(`========================================`);
       log(`Starting CST-based edge detection...`);
       const cstEdges: AkkaEdge[] = [];
+      const allCstTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allCstServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allCstToolNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
 
       for (const result of successfulParses) {
         if (result.cst) {
@@ -621,7 +641,12 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
+            result.cst,
+            result.filename,
+            sourceText,
+            outputChannel,
+          );
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -647,6 +672,27 @@ export function activate(context: vscode.ExtensionContext) {
           } else {
             log(`  No connections found in ${path.basename(result.filename)}`);
           }
+
+          // Add topic nodes to the global collection (avoiding duplicates)
+          topicNodes.forEach((topic) => {
+            if (!allCstTopicNodes.find((t) => t.id === topic.id)) {
+              allCstTopicNodes.push(topic);
+            }
+          });
+
+          // Add service stream nodes to the global collection (avoiding duplicates)
+          serviceStreamNodes.forEach((stream: { id: string; name: string; type: string; uri: vscode.Uri }) => {
+            if (!allCstServiceStreamNodes.find((s) => s.id === stream.id)) {
+              allCstServiceStreamNodes.push(stream);
+            }
+          });
+
+          // Add tool nodes to the global collection (avoiding duplicates)
+          toolNodes.forEach((tool) => {
+            if (!allCstToolNodes.find((t) => t.id === tool.id)) {
+              allCstToolNodes.push(tool);
+            }
+          });
         }
       }
 
@@ -666,39 +712,19 @@ export function activate(context: vscode.ExtensionContext) {
         log(`No edges found from CST-based detection`);
       }
 
-      // Collect all topic nodes from all files (generateCstDiagram command)
-      const allCstTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      const allCstServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      for (const result of successfulParses) {
-        if (result.cst) {
-          const document = await vscode.workspace.openTextDocument(result.filename);
-          const sourceText = document.getText();
-          const { topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
-
-          // Add topic nodes to the global collection (avoiding duplicates)
-          topicNodes.forEach((topic) => {
-            if (!allCstTopicNodes.find((t) => t.id === topic.id)) {
-              allCstTopicNodes.push(topic);
-            }
-          });
-
-          // Add service stream nodes to the global collection (avoiding duplicates)
-          serviceStreamNodes.forEach((stream) => {
-            if (!allCstServiceStreamNodes.find((s) => s.id === stream.id)) {
-              allCstServiceStreamNodes.push(stream);
-            }
-          });
-        }
-      }
-
       log(`Found ${allCstTopicNodes.length} unique topic nodes across all files`);
       allCstTopicNodes.forEach((topic, index) => {
         log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
       });
 
       log(`Found ${allCstServiceStreamNodes.length} unique service stream nodes across all files`);
-      allCstServiceStreamNodes.forEach((stream, index) => {
+      allCstServiceStreamNodes.forEach((stream: { id: string; name: string; type: string; uri: vscode.Uri }, index) => {
         log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
+      });
+
+      log(`Found ${allCstToolNodes.length} unique tool nodes across all files`);
+      allCstToolNodes.forEach((tool: any, index: any) => {
+        log(`  Tool ${index + 1}: ${tool.id} (${tool.name}) - ${tool.type}`);
       });
 
       // Convert CST components to AkkaComponent format
@@ -734,8 +760,16 @@ export function activate(context: vscode.ExtensionContext) {
         uri: stream.uri,
       }));
 
-      // Combine regular nodes, topic nodes, and service stream nodes
-      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents, ...cstServiceStreamComponents];
+      // Convert tool nodes to AkkaComponent format and add to diagram
+      const cstToolComponents: AkkaComponent[] = allCstToolNodes.map((tool) => ({
+        id: tool.id,
+        name: tool.name,
+        type: tool.type,
+        uri: tool.uri,
+      }));
+
+      // Combine regular nodes, topic nodes, service stream nodes, and tool nodes
+      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents, ...cstServiceStreamComponents, ...cstToolComponents];
 
       // Aggregate CST edges to consolidate multiple method calls between the same components
       const aggregatedCstEdges = aggregateCstEdges(cstEdges);
@@ -922,6 +956,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       const allTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
       const allServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
+      const allToolNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
       const cstEdges: AkkaEdge[] = [];
 
       for (const result of successfulParses) {
@@ -933,7 +968,12 @@ export function activate(context: vscode.ExtensionContext) {
           // Extract connections and nodes
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
+          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
+            result.cst,
+            result.filename,
+            sourceText,
+            outputChannel,
+          );
 
           // Add connections
           connections.forEach((conn) => {
@@ -953,9 +993,16 @@ export function activate(context: vscode.ExtensionContext) {
             }
           });
 
-          serviceStreamNodes.forEach((stream) => {
+          serviceStreamNodes.forEach((stream: any) => {
             if (!allServiceStreamNodes.find((s) => s.id === stream.id)) {
               allServiceStreamNodes.push(stream);
+            }
+          });
+
+          // Add tool nodes
+          toolNodes.forEach((tool) => {
+            if (!allToolNodes.find((t) => t.id === tool.id)) {
+              allToolNodes.push(tool);
             }
           });
         }
@@ -983,7 +1030,14 @@ export function activate(context: vscode.ExtensionContext) {
         uri: stream.uri,
       }));
 
-      const allNodes = [...cstNodes, ...topicComponents, ...serviceStreamComponents];
+      const toolComponents: AkkaComponent[] = allToolNodes.map((tool) => ({
+        id: tool.id,
+        name: tool.name,
+        type: tool.type,
+        uri: tool.uri,
+      }));
+
+      const allNodes = [...cstNodes, ...topicComponents, ...serviceStreamComponents, ...toolComponents];
       const aggregatedEdges = aggregateCstEdges(cstEdges);
 
       // Get theme from configuration

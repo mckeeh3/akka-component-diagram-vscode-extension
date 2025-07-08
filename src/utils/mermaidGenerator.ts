@@ -98,6 +98,8 @@ classDef consumer fill:#fff3e0,stroke:#e65100,stroke-width:2px
 classDef workflow fill:#fce4ec,stroke:#880e4f,stroke-width:2px
 classDef topic fill:#f1f8e9,stroke:#33691e,stroke-width:2px,stroke-dasharray: 5 5
 classDef servicestream fill:#e0f2f1,stroke:#004d40,stroke-width:2px,stroke-dasharray: 5 5
+classDef functiontool fill:#f5f5f5,stroke:#616161,stroke-width:2px,stroke-dasharray: 2 2
+classDef mcptool fill:#eceff1,stroke:#37474f,stroke-width:2px,stroke-dasharray: 2 2
 classDef component fill:#fafafa,stroke:#424242,stroke-width:2px`;
 }
 

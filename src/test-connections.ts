@@ -19,7 +19,7 @@ async function testConnectionExtraction() {
     });
 
     console.log(`[Test] Found ${topicNodes.length} topic nodes:`);
-    topicNodes.forEach((topic, index) => {
+    topicNodes.forEach((topic: any, index: any) => {
       console.log(`[Test]   ${index + 1}. ${topic.id} (${topic.name}) - ${topic.type}`);
     });
   } catch (error) {
