@@ -1,0 +1,1474 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Akka Multi-RegionCluster 3D Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        margin: 0;
+        background-color: #111827;
+        color: #f9fafb;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      /* Crosshair styles */
+      .crosshair {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none; /* Ensure it doesn't interfere with mouse events */
+        z-index: 1000;
+      }
+
+      .crosshair-horizontal,
+      .crosshair-vertical {
+        position: absolute;
+        background-color: rgba(255, 255, 255, 0.7);
+      }
+
+      .crosshair-horizontal {
+        width: 20px;
+        height: 1px;
+        top: 50%;
+        left: calc(50% - 10px);
+      }
+
+      .crosshair-vertical {
+        width: 1px;
+        height: 20px;
+        top: calc(50% - 10px);
+        left: 50%;
+      }
+
+      .crosshair-center {
+        position: absolute;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background-color: rgba(255, 255, 255, 0.9);
+        top: calc(50% - 2px);
+        left: calc(50% - 2px);
+      }
+
+      .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 4px;
+        color: white;
+        font-weight: bold;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 1000;
+        pointer-events: none;
+      }
+
+      .notification.failure {
+        background-color: #ef4444;
+      }
+
+      .notification.recovery {
+        background-color: #10b981;
+      }
+
+      .notification.show {
+        opacity: 1;
+      }
+      canvas {
+        display: block;
+      }
+      #infoPanel {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background-color: rgba(17, 24, 39, 0.8);
+        border: 1px solid rgba(55, 65, 81, 0.8);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        width: 300px;
+        font-family: 'Inter', sans-serif;
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+        transition: transform 0.3s ease-in-out;
+      }
+      .slider-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 8px;
+        background: #374151;
+        border-radius: 5px;
+        outline: none;
+      }
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        background: #3b82f6;
+        cursor: pointer;
+        border-radius: 50%;
+      }
+      input[type='range']::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: #3b82f6;
+        cursor: pointer;
+        border-radius: 50%;
+      }
+      #helpIcon {
+        position: absolute;
+        top: 1.5rem;
+        right: 1.5rem;
+        color: #9ca3af;
+        transition: color 0.2s;
+      }
+      #helpIcon:hover {
+        color: #f9fafb;
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <!-- Crosshair element -->
+    <div class="crosshair">
+      <div class="crosshair-horizontal"></div>
+      <div class="crosshair-vertical"></div>
+      <div class="crosshair-center"></div>
+    </div>
+
+    <!-- Notification element -->
+    <div id="notification" class="notification"></div>
+
+    <div id="infoPanel">
+      <a href="3d-simulator-help.html" target="_blank" id="helpIcon" title="Help">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      </a>
+      <h2 id="panelTitle" class="text-xl font-bold mb-4">System Overview</h2>
+      <div id="panelBody">
+        <div class="slider-label">
+          <label for="entityCount" class="font-medium text-gray-300">Total Entities</label>
+          <span id="entityCountValue" class="font-semibold text-blue-400">10000</span>
+        </div>
+        <input type="range" id="entityCount" min="1000" max="100000" value="10000" step="1000" />
+        <p class="text-sm text-gray-400 mt-4">Adjust the slider to simulate changes in the total number of entities and see the cluster structure resize.</p>
+        <div class="slider-label mt-4">
+          <label class="font-medium text-gray-300">Total Active Nodes</label>
+          <span id="nodeCountValue" class="font-semibold text-green-400">1</span>
+        </div>
+      </div>
+      <div id="selectedInfo" class="mt-4 hidden">
+        <h3 id="selectedHeader" class="font-bold text-lg">Selected: <span id="selectedName"></span></h3>
+        <p id="selectedTypeContainer" class="text-gray-400">Type: <span id="selectedType"></span></p>
+        <p id="primaryCountContainer" class="text-gray-400"><span id="primaryCountLabel"></span>: <span id="primaryCountValue"></span></p>
+        <p id="secondaryCountContainer" class="text-gray-400"><span id="secondaryCountLabel"></span>: <span id="secondaryCountValue"></span></p>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+      import { FlyControls } from 'three/addons/controls/FlyControls.js';
+
+      // --- Basic Setup ---
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // --- Lighting ---
+      const ambientLight = new THREE.AmbientLight(0xcccccc, 1.5);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5);
+      directionalLight.position.set(10, 20, 15);
+      scene.add(directionalLight);
+      const hemisphereLight = new THREE.HemisphereLight(0x3b82f6, 0x10b981, 1);
+      scene.add(hemisphereLight);
+
+      // --- Controls ---
+      const controls = new FlyControls(camera, renderer.domElement);
+      controls.movementSpeed = 40;
+      controls.rollSpeed = 0.25;
+      controls.dragToLook = true; // Only rotate when dragging
+      controls.autoForward = false;
+
+      camera.position.z = 100;
+
+      // --- Data Structure ---
+      let totalEntities = 10000;
+      let isSystemStable = false;
+      let stableFrames = 0;
+      const NUM_SHARDS = 100;
+
+      // Track the currently expanded global shard ID
+      let currentlyExpandedShardId = null;
+
+      // Track failed nodes for recovery simulation
+      const failedNodes = new Map(); // Maps node UUID to timeout ID and node data
+
+      let entityIds = [];
+
+      const baseConfig = {
+        name: 'Akka System',
+        type: 'System',
+        children: [
+          {
+            name: 'us-east-1',
+            type: 'Region',
+            children: [
+              { name: 'us-east-1-Node-1', type: 'Node' },
+              { name: 'us-east-1-Node-2', type: 'Node' },
+              { name: 'us-east-1-Node-3', type: 'Node' },
+              { name: 'us-east-1-Node-4', type: 'Node' },
+              { name: 'us-east-1-Node-5', type: 'Node' },
+              { name: 'us-east-1-Node-6', type: 'Node' },
+              { name: 'us-east-1-Node-7', type: 'Node' },
+              { name: 'us-east-1-Node-8', type: 'Node' },
+              { name: 'us-east-1-Node-9', type: 'Node' },
+              { name: 'us-east-1-Node-10', type: 'Node' },
+            ],
+          },
+          {
+            name: 'us-west-1',
+            type: 'Region',
+            children: [
+              { name: 'us-west-1-Node-1', type: 'Node' },
+              { name: 'us-west-1-Node-2', type: 'Node' },
+              { name: 'us-west-1-Node-3', type: 'Node' },
+              { name: 'us-west-1-Node-4', type: 'Node' },
+              { name: 'us-west-1-Node-5', type: 'Node' },
+              { name: 'us-west-1-Node-6', type: 'Node' },
+              { name: 'us-west-1-Node-7', type: 'Node' },
+              { name: 'us-west-1-Node-8', type: 'Node' },
+              { name: 'us-west-1-Node-9', type: 'Node' },
+              { name: 'us-west-1-Node-10', type: 'Node' },
+            ],
+          },
+          {
+            name: 'eu-central-1',
+            type: 'Region',
+            children: [
+              { name: 'eu-central-1-Node-1', type: 'Node' },
+              { name: 'eu-central-1-Node-2', type: 'Node' },
+              { name: 'eu-central-1-Node-3', type: 'Node' },
+              { name: 'eu-central-1-Node-4', type: 'Node' },
+              { name: 'eu-central-1-Node-5', type: 'Node' },
+              { name: 'eu-central-1-Node-6', type: 'Node' },
+              { name: 'eu-central-1-Node-7', type: 'Node' },
+              { name: 'eu-central-1-Node-8', type: 'Node' },
+              { name: 'eu-central-1-Node-9', type: 'Node' },
+              { name: 'eu-central-1-Node-10', type: 'Node' },
+            ],
+          },
+        ],
+      };
+
+      // --- Hierarchy Creation & Management ---
+      const objectMap = new Map();
+      const connections = [];
+      const entityConnections = []; // Store connections between replicated entities
+
+      function generateEntityId() {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let result = '';
+        for (let i = 0; i < 5; i++) {
+          result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+      }
+
+      function simpleHashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+          const char = str.charCodeAt(i);
+          hash = (hash << 5) - hash + char;
+          hash |= 0;
+        }
+        return Math.abs(hash);
+      }
+
+      function updateEntityIdList(newSize) {
+        const currentSize = entityIds.length;
+        if (newSize > currentSize) {
+          for (let i = 0; i < newSize - currentSize; i++) {
+            entityIds.push(generateEntityId());
+          }
+        } else if (newSize < currentSize) {
+          entityIds = entityIds.slice(0, newSize);
+        }
+      }
+
+      function createHierarchy(dataNode, parentData) {
+        // Debug shard creation
+        if (dataNode.type === 'Shard') {
+          console.log('Creating shard:', dataNode.name, 'with global ID:', dataNode.globalShardId);
+        }
+
+        const color = getColorForType(dataNode.type);
+        const geometry = dataNode.type === 'Entity' ? new THREE.SphereGeometry(1, 16, 16) : new THREE.SphereGeometry(1, 32, 32);
+        const material = new THREE.MeshStandardMaterial({
+          color,
+          transparent: dataNode.type === 'Region',
+          opacity: dataNode.type === 'Region' ? 0.85 : 1.0,
+          metalness: 0.3,
+          roughness: 0.6,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+
+        dataNode.parent = parentData;
+        mesh.position.set((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5);
+        if (parentData && parentData.object3D) {
+          mesh.position.add(parentData.object3D.position);
+        }
+
+        mesh.userData = dataNode;
+        dataNode.object3D = mesh;
+        dataNode.velocity = new THREE.Vector3();
+
+        objectMap.set(mesh.uuid, dataNode);
+        scene.add(mesh);
+
+        if (parentData && parentData.object3D) {
+          const lineMaterial = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.5 });
+          const lineGeometry = new THREE.BufferGeometry().setFromPoints([parentData.object3D.position, mesh.position]);
+          const line = new THREE.Line(lineGeometry, lineMaterial);
+          scene.add(line);
+          connections.push({ from: parentData.object3D, to: mesh, line });
+        }
+
+        if (dataNode.children) {
+          dataNode.children.forEach((childData) => createHierarchy(childData, dataNode));
+        }
+      }
+
+      // Initial build of the hierarchy
+      function rebuildAndDistribute() {
+        connections.forEach((c) => scene.remove(c.line));
+        objectMap.forEach((data) => scene.remove(data.object3D));
+        connections.length = 0;
+        objectMap.clear();
+
+        updateEntityIdList(totalEntities);
+
+        const displayData = { ...baseConfig, children: [] };
+        let totalActiveNodes = 0;
+
+        baseConfig.children.forEach((regionDef) => {
+          const displayRegion = { ...regionDef, children: [] };
+          displayData.children.push(displayRegion);
+
+          const maxNodesInRegion = regionDef.children.length;
+          const numActiveNodesInRegion = Math.max(1, Math.min(maxNodesInRegion, Math.ceil(totalEntities / 10000)));
+          totalActiveNodes += numActiveNodesInRegion;
+
+          const activeNodes = regionDef.children.slice(0, numActiveNodesInRegion);
+
+          const regionalShards = [];
+          for (let i = 0; i < NUM_SHARDS; i++) {
+            // Create proper shard IDs that will never change
+            const globalShardId = `Shard-${i}`;
+            const regionShardName = `${regionDef.name}-Shard-${i}`;
+
+            regionalShards.push({
+              name: regionShardName, // Region-specific shard name as primary identifier
+              globalShardId: globalShardId, // Global shard ID for cross-region coordination
+              type: 'Shard',
+              isExpanded: false,
+              children: [],
+              entityIds: [],
+            });
+          }
+
+          entityIds.forEach((id) => {
+            const shardIndex = simpleHashCode(id) % NUM_SHARDS;
+            regionalShards[shardIndex].entityIds.push(id);
+          });
+          regionalShards.forEach((s) => (s.entities = s.entityIds.length));
+
+          activeNodes.forEach((nodeDef, nodeIndex) => {
+            const shardsForThisNode = regionalShards.filter((shard, shardIndex) => shardIndex % numActiveNodesInRegion === nodeIndex);
+            const displayNode = { ...nodeDef, children: shardsForThisNode };
+            displayRegion.children.push(displayNode);
+          });
+        });
+
+        document.getElementById('nodeCountValue').textContent = totalActiveNodes;
+
+        createHierarchy(displayData, null);
+        calculateParentEntities(displayData);
+        updateScales(displayData);
+
+        isSystemStable = false;
+        stableFrames = 0;
+      }
+
+      // Dynamic update of nodes and shard distribution when entity count changes
+      function updateClusterNodes() {
+        updateEntityIdList(totalEntities);
+
+        // Find the system object
+        const systemObject = Array.from(objectMap.values()).find((obj) => obj.type === 'System');
+        if (!systemObject) return;
+
+        let totalActiveNodes = 0;
+
+        // Process each region
+        const regions = systemObject.children || [];
+        regions.forEach((regionData) => {
+          const regionDef = baseConfig.children.find((r) => r.name === regionData.name);
+          if (!regionDef) return;
+
+          const maxNodesInRegion = regionDef.children.length;
+          const numActiveNodesInRegion = Math.max(1, Math.min(maxNodesInRegion, Math.ceil(totalEntities / 10000)));
+          totalActiveNodes += numActiveNodesInRegion;
+
+          // Get current nodes in this region
+          const currentNodes = regionData.children.filter((child) => child.type === 'Node');
+
+          // Add or remove nodes as needed
+          if (currentNodes.length < numActiveNodesInRegion) {
+            // Need to add nodes
+            for (let i = currentNodes.length; i < numActiveNodesInRegion; i++) {
+              const nodeDef = regionDef.children[i];
+              const newNode = {
+                name: nodeDef.name,
+                type: 'Node',
+                children: [],
+                parent: regionData,
+              };
+
+              // Create the node in the scene
+              createHierarchy(newNode, regionData);
+              regionData.children.push(newNode);
+
+              // Position it near its parent region
+              const regionPos = regionData.object3D.position.clone();
+              newNode.object3D.position.set(regionPos.x + (Math.random() - 0.5) * 10, regionPos.y + (Math.random() - 0.5) * 10, regionPos.z + (Math.random() - 0.5) * 10);
+            }
+          } else if (currentNodes.length > numActiveNodesInRegion) {
+            // Need to remove nodes
+            const nodesToRemove = currentNodes.slice(numActiveNodesInRegion);
+
+            // For each node to remove
+            nodesToRemove.forEach((nodeData) => {
+              // First, redistribute its shards
+              const shardsToRedistribute = nodeData.children || [];
+
+              // Remove the node from the region's children
+              const nodeIndex = regionData.children.indexOf(nodeData);
+              if (nodeIndex !== -1) {
+                regionData.children.splice(nodeIndex, 1);
+              }
+
+              // Remove the node and its connections from the scene
+              if (nodeData.object3D) {
+                scene.remove(nodeData.object3D);
+                objectMap.delete(nodeData.object3D.uuid);
+
+                // Remove connections to this node
+                const nodeConnections = connections.filter((c) => c.from === nodeData.object3D || c.to === nodeData.object3D);
+                nodeConnections.forEach((c) => {
+                  scene.remove(c.line);
+                  const connIndex = connections.indexOf(c);
+                  if (connIndex !== -1) connections.splice(connIndex, 1);
+                });
+              }
+            });
+          }
+
+          // Now redistribute all shards across the active nodes
+          const activeNodes = regionData.children.filter((child) => child.type === 'Node').slice(0, numActiveNodesInRegion);
+
+          // Collect all shards from all nodes and track them by name for deduplication
+          const allShards = [];
+          const shardMap = new Map(); // Map to track shards by name
+
+          // First, collect all existing shards from the scene that belong to this region
+          // This ensures we don't lose track of shards when adding nodes
+          Array.from(objectMap.values())
+            .filter((obj) => obj.type === 'Shard')
+            .forEach((shardData) => {
+              const isFromThisRegion = shardData.parent && shardData.parent.parent && shardData.parent.parent.name === regionData.name;
+
+              if (isFromThisRegion && !shardMap.has(shardData.name)) {
+                shardMap.set(shardData.name, shardData);
+                allShards.push(shardData);
+              }
+            });
+
+          // Then collect shards from active nodes
+          activeNodes.forEach((node) => {
+            const nodeShards = node.children || [];
+
+            // Add each shard to our tracking map
+            nodeShards.forEach((shard) => {
+              // If we already have this shard name tracked, we'll use the existing one
+              if (!shardMap.has(shard.name)) {
+                shardMap.set(shard.name, shard);
+                allShards.push(shard);
+              }
+            });
+
+            // Clear node's children
+            node.children = [];
+          });
+
+          // Redistribute entity IDs to shards
+          const regionalShards = [];
+
+          // We've already collected all valid shards from the scene into shardMap
+          // Now we need to remove any duplicate shards that might exist
+          // (This can happen if there are shards with the same name but different objects)
+          const seenShardObjects = new Set();
+
+          Array.from(objectMap.values())
+            .filter((obj) => obj.type === 'Shard')
+            .forEach((shardData) => {
+              const isFromThisRegion = shardData.parent && shardData.parent.parent && shardData.parent.parent.name === regionData.name;
+
+              if (isFromThisRegion) {
+                const trackedShard = shardMap.get(shardData.name);
+
+                // If this is not the tracked instance of this shard for this region, remove it
+                if (!trackedShard || trackedShard !== shardData) {
+                  // Remove the shard object and its connections
+                  if (shardData.object3D) {
+                    scene.remove(shardData.object3D);
+                    objectMap.delete(shardData.object3D.uuid);
+
+                    // Remove connections to this shard
+                    const shardConnections = connections.filter((c) => c.from === shardData.object3D || c.to === shardData.object3D);
+                    shardConnections.forEach((c) => {
+                      scene.remove(c.line);
+                      const connIndex = connections.indexOf(c);
+                      if (connIndex !== -1) connections.splice(connIndex, 1);
+                    });
+                  }
+                } else {
+                  // This is the tracked instance, mark it as seen
+                  seenShardObjects.add(shardData);
+                }
+              }
+            });
+
+          // Now create or reuse shards for each shard index
+          for (let i = 0; i < NUM_SHARDS; i++) {
+            // Create a region-specific shard ID since shards are scoped to regions, not nodes
+            // This will be used for tracking shards within a region
+            const regionShardName = `${regionData.name}-Shard-${i}`;
+
+            // Also maintain a global shard ID for cross-region tracking of conceptually equivalent shards
+            // This is used for expansion/collapse coordination across regions
+            const globalShardName = `Shard-${i}`;
+            console.log(`Creating/updating shard ${regionShardName} with global ID ${globalShardName}`);
+
+            // Try to find existing shard by region-specific name
+            let shard = null;
+
+            // First check if we already have this shard in our tracking map
+            // We use regionShardName as the key since shards are unique per region
+            if (shardMap.has(regionShardName)) {
+              shard = shardMap.get(regionShardName);
+            }
+
+            // If we don't have this shard yet, create a new one
+            if (!shard) {
+              shard = {
+                name: regionShardName,
+                globalShardId: globalShardName, // Set the global ID for cross-region coordination
+                type: 'Shard',
+                entities: 0,
+                entityIds: [],
+                isExpanded: false,
+              };
+              shardMap.set(regionShardName, shard);
+              allShards.push(shard);
+            } else {
+              // Ensure existing shard has the global ID property set
+              shard.globalShardId = globalShardName;
+            }
+
+            regionalShards.push(shard);
+          }
+
+          // Clear existing entity assignments for this region's shards
+          regionalShards.forEach((shard) => {
+            shard.entityIds = [];
+            shard.entities = 0;
+          });
+
+          console.log(`Region ${regionData.name}: Replicating ${entityIds.length} entities among ${regionalShards.length} shards`);
+
+          // Replicate ALL entities to this region (not just a subset)
+          // Each entity is assigned to a shard based on its hash
+          entityIds.forEach((id) => {
+            const shardIndex = simpleHashCode(id) % NUM_SHARDS;
+            regionalShards[shardIndex].entityIds.push(id);
+          });
+
+          // Update entity counts for each shard
+          regionalShards.forEach((s) => (s.entities = s.entityIds.length));
+          console.log(`Region ${regionData.name}: Entity replication complete`);
+
+          // Debug: log entity counts per shard
+          regionalShards.forEach((s, idx) => {
+            console.log(`Region ${regionData.name}, Shard ${idx}: ${s.entityIds.length} entities`);
+          });
+
+          // Distribute shards to nodes
+          activeNodes.forEach((nodeData, nodeIndex) => {
+            const shardsForThisNode = regionalShards.filter((shard, shardIndex) => shardIndex % activeNodes.length === nodeIndex);
+
+            // Assign shards to this node
+            nodeData.children = shardsForThisNode;
+
+            // Update parent reference for each shard
+            shardsForThisNode.forEach((shard) => {
+              shard.parent = nodeData;
+
+              // If this is a new shard, create it in the scene
+              if (!shard.object3D) {
+                createHierarchy(shard, nodeData);
+
+                // Set initial size based on entity count
+                if (shard.object3D) {
+                  const baseVolume = 1;
+                  const radius = Math.cbrt(baseVolume * (shard.entities || 1)) / 5;
+                  const scale = Math.max(0.1, radius);
+                  shard.object3D.scale.set(scale, scale, scale);
+                }
+              } else {
+                // Otherwise update its connections
+                const shardConnections = connections.filter((c) => c.to === shard.object3D);
+                shardConnections.forEach((c) => {
+                  scene.remove(c.line);
+                  const connIndex = connections.indexOf(c);
+                  if (connIndex !== -1) connections.splice(connIndex, 1);
+                });
+
+                // Create new connection to the new parent
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.5 });
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints([nodeData.object3D.position, shard.object3D.position]);
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                scene.add(line);
+                connections.push({ from: nodeData.object3D, to: shard.object3D, line });
+
+                // Update shard size based on entity count
+                if (shard.object3D) {
+                  const baseVolume = 1;
+                  const radius = Math.cbrt(baseVolume * (shard.entities || 1)) / 5;
+                  const scale = Math.max(0.1, radius);
+                  shard.object3D.scale.set(scale, scale, scale);
+                }
+              }
+            });
+          });
+        });
+
+        document.getElementById('nodeCountValue').textContent = totalActiveNodes;
+
+        // Update entity counts and scales
+        calculateParentEntities(systemObject);
+        updateScales(systemObject);
+
+        // Reset stability to allow the force-directed layout to reposition everything
+        isSystemStable = false;
+        stableFrames = 0;
+      }
+
+      function calculateParentEntities(node) {
+        if (node.type === 'System' || node.type === 'Region') {
+          node.entities = totalEntities;
+          if (node.children) {
+            node.children.forEach(calculateParentEntities);
+          }
+          return;
+        }
+
+        if (!node.children || node.children.length === 0) {
+          return;
+        }
+        node.entities = node.children.reduce((acc, child) => {
+          calculateParentEntities(child);
+          return acc + (child.entities || 0);
+        }, 0);
+      }
+
+      function updateScales(node) {
+        const baseVolume = 1;
+        const radius = Math.cbrt(baseVolume * (node.entities || 1)) / 5;
+
+        let scale = Math.max(0.1, radius);
+        if (node.type === 'Entity') scale = 0.6;
+
+        if (node.object3D && isFinite(scale)) {
+          node.object3D.scale.set(scale, scale, scale);
+        }
+
+        if (node.children) {
+          node.children.forEach(updateScales);
+        }
+      }
+
+      // --- Physics-based Layout ---
+      const forceParams = {
+        attraction: 0.02,
+        siblingRepulsion: 100,
+        grandparentAxisRepulsion: 0.2,
+        damping: 0.9,
+        maxSpeed: 0.5,
+        restLength: 60,
+        energyThreshold: 0.0001,
+        requiredStableFrames: 200,
+      };
+
+      function applyForces() {
+        if (isSystemStable) return;
+
+        const objects = Array.from(objectMap.values());
+        let totalEnergy = 0;
+
+        objects.forEach((data) => {
+          if (data.type === 'System') return;
+
+          const child = data.object3D;
+          const parentData = data.parent;
+          const parent = parentData?.object3D;
+
+          if (parent) {
+            const distanceVec = new THREE.Vector3().subVectors(parent.position, child.position);
+            const distance = distanceVec.length();
+            let idealDistance = forceParams.restLength + parent.scale.x + child.scale.x;
+            if (data.type === 'Entity') idealDistance = parent.scale.x + 5;
+
+            const displacement = idealDistance - distance;
+            const springForce = forceParams.attraction * displacement;
+            data.velocity.sub(distanceVec.normalize().multiplyScalar(springForce));
+          }
+
+          if (parentData?.children) {
+            const siblings = parentData.children.filter((c) => c !== data);
+            siblings.forEach((siblingData) => {
+              const sibling = siblingData.object3D;
+              const distanceVec = new THREE.Vector3().subVectors(child.position, sibling.position);
+              const distanceSq = distanceVec.lengthSq();
+              if (distanceSq > 0) {
+                let repulsionForce = forceParams.siblingRepulsion;
+                if (data.type === 'Entity') repulsionForce /= 10;
+                repulsionForce /= distanceSq;
+
+                data.velocity.add(distanceVec.normalize().multiplyScalar(repulsionForce));
+              }
+            });
+          }
+
+          const grandparent = parentData?.parent?.object3D;
+          let grandparentAxis;
+          if (grandparent) {
+            grandparentAxis = new THREE.Vector3().subVectors(parent.position, grandparent.position);
+          } else if (parentData?.type === 'System') {
+            grandparentAxis = new THREE.Vector3().copy(child.position).normalize();
+          }
+
+          if (grandparentAxis && grandparentAxis.lengthSq() > 0) {
+            grandparentAxis.normalize();
+            const force = grandparentAxis.multiplyScalar(forceParams.grandparentAxisRepulsion);
+            data.velocity.add(force);
+          }
+        });
+
+        objects.forEach((obj) => {
+          if (obj.type !== 'System') {
+            if (obj.velocity.length() > forceParams.maxSpeed) {
+              obj.velocity.normalize().multiplyScalar(forceParams.maxSpeed);
+            }
+            obj.object3D.position.add(obj.velocity);
+          }
+          obj.velocity.multiplyScalar(forceParams.damping);
+          totalEnergy += obj.velocity.lengthSq();
+        });
+
+        if (totalEnergy < forceParams.energyThreshold) {
+          stableFrames++;
+        } else {
+          stableFrames = 0;
+        }
+
+        if (stableFrames > forceParams.requiredStableFrames) {
+          isSystemStable = true;
+          objects.forEach((obj) => obj.velocity.set(0, 0, 0));
+        }
+      }
+
+      // --- Helper Functions ---
+      function getColorForType(type) {
+        switch (type) {
+          case 'System':
+            return 0x00d4ff;
+          case 'Region':
+            return 0x3b82f6; // Blue
+          case 'Node':
+            return 0x10b981; // Green
+          case 'Shard':
+            return 0xf59e0b; // Amber
+          case 'Entity':
+            return 0xe5e7eb;
+          default:
+            return 0x6b7280;
+        }
+      }
+
+      function removeEntitiesFromShard(shardData) {
+        if (!shardData.isExpanded) return;
+
+        shardData.children?.forEach((entityData) => {
+          if (entityData.object3D) {
+            scene.remove(entityData.object3D);
+            objectMap.delete(entityData.object3D.uuid);
+          }
+          const connIndex = connections.findIndex((c) => c.to === entityData.object3D);
+          if (connIndex > -1) {
+            scene.remove(connections[connIndex].line);
+            connections.splice(connIndex, 1);
+          }
+        });
+        shardData.children = [];
+        shardData.isExpanded = false;
+      }
+
+      // Function to show notification
+      function showNotification(message, type) {
+        const notification = document.getElementById('notification');
+        notification.textContent = message;
+        notification.className = 'notification ' + type;
+
+        // Add the show class to make it visible
+        setTimeout(() => {
+          notification.classList.add('show');
+        }, 10);
+
+        // Hide after 3 seconds
+        setTimeout(() => {
+          notification.classList.remove('show');
+        }, 3000);
+      }
+
+      // Function to simulate node failure
+      function simulateNodeFailure(nodeData) {
+        // Check if this node is already failed
+        if (failedNodes.has(nodeData.object3D.uuid)) {
+          console.log('Node already in failed state:', nodeData.name);
+          showNotification(`Node ${nodeData.name} is already in failed state`, 'failure');
+          return;
+        }
+
+        // Check if there are at least 2 nodes in this region to allow failure
+        const regionData = nodeData.parent;
+        const activeNodesInRegion = regionData.children.filter((child) => child.type === 'Node' && !failedNodes.has(child.object3D?.uuid));
+
+        if (activeNodesInRegion.length <= 1) {
+          console.log('Cannot fail node - need at least one active node in region:', regionData.name);
+          showNotification(`Cannot fail node - need at least one active node in region ${regionData.name}`, 'failure');
+          return;
+        }
+
+        console.log('Simulating failure of node:', nodeData.name);
+        showNotification(`Node ${nodeData.name} failure simulated`, 'failure');
+
+        // Hide the node and its connections
+        nodeData.object3D.visible = false;
+
+        // Hide all connections to/from this node
+        connections.forEach((conn) => {
+          if (conn.from === nodeData.object3D || conn.to === nodeData.object3D) {
+            conn.line.visible = false;
+          }
+        });
+
+        // Redistribute entities from this node's shards to other nodes in the region
+        redistributeShardsFromFailedNode(nodeData);
+
+        // Store the node data and set a timeout for recovery
+        const timeoutId = setTimeout(() => recoverNode(nodeData.object3D.uuid), 8000);
+        failedNodes.set(nodeData.object3D.uuid, { timeoutId, nodeData });
+      }
+
+      // Function to redistribute shards from a failed node
+      function redistributeShardsFromFailedNode(nodeData) {
+        // Get all active nodes in the same region
+        const regionData = nodeData.parent;
+        const activeNodesInRegion = regionData.children.filter((child) => child.type === 'Node' && child !== nodeData && !failedNodes.has(child.object3D?.uuid));
+
+        if (activeNodesInRegion.length === 0) {
+          console.log('No active nodes to redistribute shards to in region:', regionData.name);
+          return;
+        }
+
+        // Show notification about redistribution
+        showNotification(`Redistributing shards from node ${nodeData.name}`, 'failure');
+
+        // First, check if any shard in the system is expanded and hide all entities
+        // This ensures a clean state when redistributing shards
+        if (currentlyExpandedShardId) {
+          // Find all shards with this global ID and collapse them
+          Array.from(objectMap.values())
+            .filter((obj) => obj.type === 'Shard' && obj.globalShardId === currentlyExpandedShardId)
+            .forEach((shardData) => {
+              if (shardData.isExpanded) {
+                console.log(`Collapsing expanded shard ${shardData.name} during node failure`);
+                removeEntitiesFromShard(shardData);
+              }
+            });
+
+          // Reset the currently expanded shard tracking
+          currentlyExpandedShardId = null;
+        }
+
+        // For each shard in the failed node, reassign it to an active node
+        nodeData.children.forEach((shardData, index) => {
+          // Skip if not a shard
+          if (shardData.type !== 'Shard') return;
+
+          // If entities are expanded, collapse them first (redundant check but keeping for safety)
+          if (shardData.isExpanded) {
+            removeEntitiesFromShard(shardData);
+          }
+
+          // Choose a target node (round robin)
+          const targetNode = activeNodesInRegion[index % activeNodesInRegion.length];
+          console.log(`Redistributing shard ${shardData.name} from ${nodeData.name} to ${targetNode.name}`);
+
+          // Add the shard to the target node's children
+          if (!targetNode.children.includes(shardData)) {
+            targetNode.children.push(shardData);
+          }
+
+          // Update the shard's parent reference
+          shardData.parent = targetNode;
+
+          // Move the shard visually to the target node
+          if (shardData.object3D && targetNode.object3D) {
+            // Create new connection to the target node
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.5 });
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([targetNode.object3D.position, shardData.object3D.position]);
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            scene.add(line);
+            connections.push({ from: targetNode.object3D, to: shardData.object3D, line });
+          }
+        });
+
+        // Remove all connections from the failed node
+        const nodeConnections = connections.filter((c) => c.from === nodeData.object3D || c.to === nodeData.object3D);
+        nodeConnections.forEach((c) => {
+          scene.remove(c.line);
+          const connIndex = connections.indexOf(c);
+          if (connIndex !== -1) connections.splice(connIndex, 1);
+        });
+
+        // Clear the node's children since they were redistributed
+        nodeData.children = [];
+
+        // Find the system object to recalculate entity counts
+        const systemObject = Array.from(objectMap.values()).find((obj) => obj.type === 'System');
+        if (systemObject) {
+          // Recalculate entity counts for all nodes
+          calculateParentEntities(systemObject);
+          updateScales(systemObject);
+        }
+
+        // Force the system to be unstable to trigger force-directed layout updates
+        isSystemStable = false;
+        stableFrames = 0;
+      }
+
+      // Function to recover a failed node
+      function recoverNode(nodeUuid) {
+        if (!failedNodes.has(nodeUuid)) {
+          console.log('Node not found in failed nodes map:', nodeUuid);
+          return;
+        }
+
+        const { nodeData } = failedNodes.get(nodeUuid);
+        console.log('Recovering node:', nodeData.name);
+        showNotification(`Node ${nodeData.name} recovered`, 'recovery');
+
+        // Make the node visible again
+        nodeData.object3D.visible = true;
+
+        // Restore connections
+        connections.forEach((conn) => {
+          if (conn.from === nodeData.object3D || conn.to === nodeData.object3D) {
+            conn.line.visible = true;
+          }
+        });
+
+        // Remove from failed nodes map
+        failedNodes.delete(nodeUuid);
+
+        // Clear the node's children since they were redistributed
+        nodeData.children = [];
+
+        // Trigger a full redistribution to rebalance the cluster
+        // This will redistribute shards evenly across all nodes including the recovered one
+        console.log(`Redistributing shards after node ${nodeData.name} recovery`);
+
+        // Add a small delay to make the recovery and redistribution visually distinct
+        setTimeout(() => {
+          // Show a notification about redistribution
+          showNotification(`Rebalancing shards across cluster`, 'recovery');
+
+          // Trigger the redistribution
+          updateClusterNodes();
+
+          // Find the system object to recalculate entity counts
+          const systemObject = Array.from(objectMap.values()).find((obj) => obj.type === 'System');
+          if (systemObject) {
+            // Recalculate entity counts for all nodes
+            calculateParentEntities(systemObject);
+            updateScales(systemObject);
+          }
+
+          // Force the system to be unstable to trigger force-directed layout updates
+          isSystemStable = false;
+          stableFrames = 0;
+        }, 500);
+      }
+
+      function showEntitiesForShard(shardData) {
+        if (shardData.isExpanded) return;
+
+        shardData.children = [];
+        shardData.entityIds.forEach((id) => {
+          const entityData = { name: id, type: 'Entity' };
+          createHierarchy(entityData, shardData);
+          shardData.children.push(entityData);
+        });
+        updateScales(shardData);
+        shardData.isExpanded = true;
+        isSystemStable = false;
+        stableFrames = 0;
+      }
+
+      // --- UI and Interaction ---
+      const entitySlider = document.getElementById('entityCount');
+      const entityValue = document.getElementById('entityCountValue');
+
+      entitySlider.addEventListener('input', (e) => {
+        totalEntities = parseInt(e.target.value);
+        entityValue.textContent = totalEntities.toLocaleString();
+
+        // Hide any expanded entities when entity count changes
+        if (currentlyExpandedShardId) {
+          objectMap.forEach((objData) => {
+            if (objData.type === 'Shard') {
+              removeEntitiesFromShard(objData);
+            }
+          });
+          currentlyExpandedShardId = null;
+        }
+
+        // Use the new dynamic update function instead of rebuilding everything
+        if (objectMap.size > 0) {
+          updateClusterNodes();
+        } else {
+          // First time initialization still needs a full build
+          rebuildAndDistribute();
+        }
+      });
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      let selectedObject = null;
+      let targetPosition = new THREE.Vector3();
+      let targetLookAt = new THREE.Vector3();
+      let isFocusing = false;
+      let selectedEntityReplicas = [];
+      let selectedEntityPositions = []; // Store positions of selected entities for drawing connections
+      let clickedGlobalShardId = null; // Add global variable for tracking clicked shard's global ID
+
+      const mouseDownPos = new THREE.Vector2();
+      renderer.domElement.addEventListener('mousedown', (event) => {
+        mouseDownPos.set(event.clientX, event.clientY);
+      });
+
+      renderer.domElement.addEventListener('mouseup', (event) => {
+        const deltaX = Math.abs(event.clientX - mouseDownPos.x);
+        const deltaY = Math.abs(event.clientY - mouseDownPos.y);
+        if (deltaX < 5 && deltaY < 5) {
+          handleClick(event);
+        }
+      });
+
+      function handleClick(event) {
+        if (event.target.closest('#infoPanel')) return;
+
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(Array.from(objectMap.values()).map((d) => d.object3D));
+
+        // Check if this is a Ctrl+click for node failure simulation
+        const isCtrlClick = event.ctrlKey || event.metaKey; // Support both Ctrl and Command (Mac)
+
+        if (selectedObject) {
+          selectedObject.material.emissive.setHex(0x000000);
+          selectedObject = null;
+        }
+        // Reset colors of previously selected entities
+        selectedEntityReplicas.forEach((entityMesh) => {
+          entityMesh.material.color.set(getColorForType('Entity'));
+        });
+        selectedEntityReplicas = [];
+        selectedEntityPositions = [];
+
+        // Remove any existing entity connection lines
+        entityConnections.forEach((conn) => {
+          scene.remove(conn);
+        });
+        entityConnections.length = 0;
+
+        let clickedShardName = null;
+        let shouldToggle = false;
+        let clickedEntityType = null;
+
+        if (intersects.length > 0) {
+          const intersectedData = intersects[0].object.userData;
+          selectedObject = intersects[0].object;
+          selectedObject.material.emissive.setHex(0xcc0000);
+
+          clickedEntityType = intersectedData.type;
+
+          // Handle Ctrl+click for node failure simulation
+          if (isCtrlClick && clickedEntityType === 'Node') {
+            // Get the node data from objectMap
+            const nodeData = objectMap.get(selectedObject.uuid);
+            if (nodeData) {
+              simulateNodeFailure(nodeData);
+              // Return early to prevent other click behaviors
+              return;
+            }
+          }
+
+          const selectedHeader = document.getElementById('selectedHeader');
+          const selectedName = document.getElementById('selectedName');
+          const selectedTypeContainer = document.getElementById('selectedTypeContainer');
+          const selectedType = document.getElementById('selectedType');
+          const primaryCountContainer = document.getElementById('primaryCountContainer');
+          const primaryCountLabel = document.getElementById('primaryCountLabel');
+          const primaryCountValue = document.getElementById('primaryCountValue');
+          const secondaryCountContainer = document.getElementById('secondaryCountContainer');
+          const secondaryCountLabel = document.getElementById('secondaryCountLabel');
+          const secondaryCountValue = document.getElementById('secondaryCountValue');
+
+          document.getElementById('selectedInfo').classList.remove('hidden');
+          document.getElementById('panelTitle').textContent = 'Object Details';
+          selectedHeader.innerHTML = `Selected: <span id="selectedName">${intersectedData.name}</span>`;
+          selectedTypeContainer.classList.remove('hidden');
+          primaryCountContainer.classList.remove('hidden');
+          secondaryCountContainer.classList.remove('hidden');
+
+          selectedType.textContent = intersectedData.type;
+
+          switch (intersectedData.type) {
+            case 'System':
+              primaryCountLabel.textContent = 'Regions';
+              primaryCountValue.textContent = intersectedData.children?.length || 0;
+              secondaryCountLabel.textContent = 'Total Entities';
+              secondaryCountValue.textContent = intersectedData.entities?.toLocaleString() || 0;
+              break;
+            case 'Region':
+              primaryCountLabel.textContent = 'Cluster Nodes';
+              primaryCountValue.textContent = intersectedData.children?.length || 0;
+              secondaryCountLabel.textContent = 'Total Entities';
+              secondaryCountValue.textContent = intersectedData.entities?.toLocaleString() || 0;
+              break;
+            case 'Node':
+              primaryCountLabel.textContent = 'Total Shards';
+              primaryCountValue.textContent = intersectedData.children?.length || 0;
+              secondaryCountLabel.textContent = 'Total Entities';
+              secondaryCountValue.textContent = intersectedData.entities?.toLocaleString() || 0;
+              break;
+            case 'Shard':
+              primaryCountLabel.textContent = 'Total Entities';
+              primaryCountValue.textContent = intersectedData.entities?.toLocaleString() || 0;
+              secondaryCountContainer.classList.add('hidden');
+              break;
+            case 'Entity':
+              selectedHeader.innerHTML = `Entity ID: <span id="selectedName">${intersectedData.name}</span>`;
+              selectedTypeContainer.classList.add('hidden');
+              primaryCountContainer.classList.add('hidden');
+              secondaryCountContainer.classList.add('hidden');
+              break;
+          }
+
+          const offset = 30 + selectedObject.scale.x * 5;
+          targetPosition.copy(selectedObject.position).add(new THREE.Vector3(offset / 2, offset / 2, offset));
+          targetLookAt.copy(selectedObject.position);
+
+          if (clickedEntityType === 'Shard') {
+            // Store both the region-specific name and the global shard ID
+            clickedShardName = intersectedData.name;
+            clickedGlobalShardId = intersectedData.globalShardId;
+
+            // The globalShardId should always be set during initial hierarchy creation
+            console.log('Clicked shard:', clickedShardName, 'with global ID:', clickedGlobalShardId);
+
+            shouldToggle = !intersectedData.isExpanded;
+          } else if (clickedEntityType === 'Entity') {
+            const clickedEntityId = intersectedData.name;
+
+            // Find all replicas of this entity across regions
+            objectMap.forEach((objData) => {
+              if (objData.type === 'Entity' && objData.name === clickedEntityId) {
+                objData.object3D.material.color.set(0xff0000);
+                selectedEntityReplicas.push(objData.object3D);
+                selectedEntityPositions.push(objData.object3D.position);
+              }
+            });
+
+            // Create lines connecting the entities if we have more than one
+            if (selectedEntityPositions.length > 1) {
+              // Create lines between each pair of entities
+              for (let i = 0; i < selectedEntityPositions.length; i++) {
+                for (let j = i + 1; j < selectedEntityPositions.length; j++) {
+                  const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0xff0000,
+                    transparent: true,
+                    opacity: 0.7,
+                    linewidth: 1,
+                  });
+
+                  const lineGeometry = new THREE.BufferGeometry().setFromPoints([selectedEntityPositions[i], selectedEntityPositions[j]]);
+
+                  const line = new THREE.Line(lineGeometry, lineMaterial);
+                  scene.add(line);
+                  entityConnections.push(line);
+                }
+              }
+            }
+          }
+        } else {
+          document.getElementById('selectedInfo').classList.add('hidden');
+          document.getElementById('panelTitle').textContent = 'System Overview';
+          isFocusing = false;
+        }
+
+        if (clickedEntityType === 'Shard') {
+          console.log('Processing clicked shard:', clickedShardName, 'with global ID:', clickedGlobalShardId);
+
+          // Check if we're clicking the same shard that's already expanded
+          if (currentlyExpandedShardId === clickedGlobalShardId) {
+            // Collapse all shards - toggle behavior
+            objectMap.forEach((objData) => {
+              if (objData.type === 'Shard') {
+                removeEntitiesFromShard(objData);
+              }
+            });
+            currentlyExpandedShardId = null;
+            console.log('Collapsed all shards - toggled off');
+          } else {
+            // Collapse all shards first
+            objectMap.forEach((objData) => {
+              if (objData.type === 'Shard') {
+                removeEntitiesFromShard(objData);
+              }
+            });
+
+            // Then expand all shards with the matching global ID
+            if (clickedGlobalShardId) {
+              // Find all shards with the same global ID across regions
+              const matchingShards = Array.from(objectMap.values()).filter((obj) => obj.type === 'Shard' && obj.globalShardId === clickedGlobalShardId);
+
+              console.log('Found', matchingShards.length, 'matching shards with global ID:', clickedGlobalShardId);
+
+              // Expand all matching shards
+              matchingShards.forEach((shard) => {
+                console.log('Expanding shard:', shard.name);
+                showEntitiesForShard(shard);
+              });
+
+              // Update the currently expanded shard ID
+              currentlyExpandedShardId = clickedGlobalShardId;
+            }
+          }
+        } else if (clickedEntityType && clickedEntityType !== 'Entity') {
+          // Only hide entities if clicking another sphere (not empty space)
+          // and not an entity (to allow selecting entities)
+          objectMap.forEach((objData) => {
+            if (objData.type === 'Shard') {
+              removeEntitiesFromShard(objData);
+            }
+          });
+          currentlyExpandedShardId = null;
+        }
+      }
+
+      // --- Keyboard Fly Controls ---
+      const keyState = {};
+      window.addEventListener('keydown', (e) => {
+        if (!e.target.closest('#infoPanel')) keyState[e.code] = true;
+        // If any movement key is pressed while focusing, cancel the focus to allow free movement
+        if (
+          isFocusing &&
+          (e.code === 'KeyW' ||
+            e.code === 'KeyA' ||
+            e.code === 'KeyS' ||
+            e.code === 'KeyD' ||
+            e.code === 'KeyR' ||
+            e.code === 'KeyF' ||
+            e.code === 'ArrowUp' ||
+            e.code === 'ArrowDown' ||
+            e.code === 'ArrowLeft' ||
+            e.code === 'ArrowRight')
+        ) {
+          isFocusing = false;
+        }
+      });
+      window.addEventListener('keyup', (e) => {
+        keyState[e.code] = false;
+      });
+
+      // Cancel focusing when mouse is pressed for FlyControls
+      renderer.domElement.addEventListener('mousedown', (e) => {
+        if (e.button === 0) {
+          // Left mouse button
+          if (isFocusing) {
+            isFocusing = false;
+          }
+        }
+      });
+
+      // Add global mouse up handler to prevent controls from getting stuck
+      window.addEventListener('mouseup', (e) => {
+        // Force the FlyControls to recognize mouse up even if it happens outside the renderer
+        controls.mousemove = false;
+        controls.moveState.yawLeft = 0;
+        controls.moveState.pitchDown = 0;
+        controls.moveState.rollLeft = 0;
+        controls.moveState.forward = 0;
+        controls.moveState.back = 0;
+        controls.moveState.left = 0;
+        controls.moveState.right = 0;
+        controls.moveState.up = 0;
+        controls.moveState.down = 0;
+
+        // Reset all mouse states
+        controls.mouseStatus = 0;
+
+        // Update both rotation and movement vectors
+        controls.updateRotationVector();
+        controls.updateMovementVector();
+      });
+
+      // Also add a mouseleave handler to catch when mouse leaves the window
+      renderer.domElement.addEventListener('mouseleave', () => {
+        controls.mousemove = false;
+        controls.moveState.yawLeft = 0;
+        controls.moveState.pitchDown = 0;
+        controls.updateRotationVector();
+      });
+
+      const clock = new THREE.Clock();
+
+      function updateCamera() {
+        const delta = clock.getDelta();
+
+        // Handle smooth transition to selected object
+        if (isFocusing && selectedObject) {
+          camera.position.lerp(targetPosition, 0.05);
+          // Look at the object during transition
+          camera.lookAt(selectedObject.position);
+
+          if (camera.position.distanceTo(targetPosition) < 0.1) {
+            isFocusing = false;
+          }
+
+          // Update controls with delta time
+          controls.update(delta);
+        } else {
+          // Normal flying mode - FlyControls handles all movement
+          controls.update(delta);
+        }
+      }
+
+      // --- Main Animation Loop ---
+      function animate() {
+        requestAnimationFrame(animate);
+
+        updateCamera();
+        applyForces();
+
+        // Update regular connections between objects
+        connections.forEach((c) => {
+          c.line.geometry.setFromPoints([c.from.position, c.to.position]);
+          c.line.geometry.computeBoundingSphere();
+        });
+
+        // Update entity connection lines if entities are selected
+        if (selectedEntityReplicas.length > 1) {
+          // Get updated positions of selected entities
+          const updatedPositions = selectedEntityReplicas.map((entity) => entity.position);
+
+          // Update each entity connection line
+          let connectionIndex = 0;
+          for (let i = 0; i < selectedEntityReplicas.length; i++) {
+            for (let j = i + 1; j < selectedEntityReplicas.length; j++) {
+              if (connectionIndex < entityConnections.length) {
+                entityConnections[connectionIndex].geometry.setFromPoints([updatedPositions[i], updatedPositions[j]]);
+                entityConnections[connectionIndex].geometry.computeBoundingSphere();
+                connectionIndex++;
+              }
+            }
+          }
+        }
+
+        // FlyControls update is handled in updateCamera()
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // --- Initial Call ---
+      // Initialize the slider value to match the initial entity count
+      document.getElementById('entityCount').value = totalEntities;
+      document.getElementById('entityCountValue').textContent = totalEntities.toLocaleString();
+
+      rebuildAndDistribute();
+      animate();
+    </script>
+  </body>
+</html>

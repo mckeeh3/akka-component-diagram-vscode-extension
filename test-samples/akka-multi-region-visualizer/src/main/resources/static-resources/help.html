@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Akka Multi-Region Grid Demo - Help</title>
+    <link rel="stylesheet" href="index.css" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon" />
+    <style>
+      /* Additional styles for help page */
+      .help-container {
+        max-width: 900px;
+        margin: 20px auto;
+        padding: 20px;
+        background-color: rgba(15, 30, 60, 0.8);
+        border-radius: 8px;
+        box-shadow: 0 0 15px rgba(0, 150, 255, 0.3);
+        backdrop-filter: blur(5px);
+      }
+
+      h1,
+      h2 {
+        color: #a7ecff;
+        margin-bottom: 15px;
+        text-shadow: 0 0 5px rgba(0, 200, 255, 0.5);
+      }
+
+      h1 {
+        text-align: center;
+        border-bottom: 1px solid #2a6ca5;
+        padding-bottom: 10px;
+      }
+
+      h3 {
+        padding-bottom: 5px;
+      }
+
+      p,
+      ul,
+      ol {
+        margin-bottom: 15px;
+        line-height: 1.6;
+      }
+
+      ul,
+      ol {
+        padding-left: 25px;
+      }
+
+      .key {
+        display: inline-block;
+        background-color: rgba(30, 50, 80, 0.9);
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid #2a6ca5;
+        margin: 0 3px;
+        font-family: monospace;
+        box-shadow: 0 0 5px rgba(0, 150, 255, 0.2);
+      }
+
+      .color-box {
+        display: inline-block;
+        width: 15px;
+        height: 15px;
+        margin: 0 5px;
+        border-radius: 3px;
+        vertical-align: middle;
+      }
+
+      .red {
+        background-color: #ff5252;
+      }
+      .green {
+        background-color: #4caf50;
+      }
+      .blue {
+        background-color: #2196f3;
+      }
+      .orange {
+        background-color: #f0950c;
+      }
+      .predator {
+        background-color: #730192;
+      }
+
+      .section {
+        margin-bottom: 30px;
+      }
+
+      .back-link {
+        display: block;
+        text-align: center;
+        margin-top: 20px;
+        color: #a7ecff;
+        text-decoration: none;
+      }
+
+      .back-link:hover {
+        text-decoration: underline;
+        text-shadow: 0 0 8px rgba(0, 200, 255, 0.8);
+      }
+
+      .diagram {
+        background-color: rgba(10, 20, 40, 0.5);
+        padding: 15px;
+        border-radius: 6px;
+        margin: 20px 0;
+        border: 1px dashed #2a6ca5;
+      }
+
+      code {
+        font-family: monospace;
+        background-color: rgba(30, 50, 80, 0.9);
+        padding: 2px 5px;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info-panel">
+      <div>Region: <span id="region-url">Help Page</span></div>
+      <div><a href="index.html" style="color: #a7ecff; text-decoration: none">Return to Grid</a></div>
+    </div>
+
+    <div class="help-container">
+      <h1>Akka Multi-Region Grid Demo - Help</h1>
+
+      <div class="section">
+        <h2>How to Use the UI</h2>
+        <p>
+          The Akka Multi-Region Grid Demo provides a visual interface for interacting with a distributed grid of cells. Each cell can be in one of six states: default (empty) or color (red, green,
+          blue, orange, predator).
+        </p>
+
+        <h3>Basic Interactions:</h3>
+        <ul>
+          <li>
+            <strong>Changing Cell States</strong>: Hover over any cell and press one of the following keys:
+            <ul>
+              <li><span class="key">r</span> - Set cell to <span class="color-box red"></span> red</li>
+              <li><span class="key">g</span> - Set cell to <span class="color-box green"></span> green</li>
+              <li><span class="key">b</span> - Set cell to <span class="color-box blue"></span> blue</li>
+              <li><span class="key">o</span> - Set cell to <span class="color-box orange"></span> orange</li>
+              <li><span class="key">p</span> - Set cell to <span class="color-box predator"></span> predator</li>
+              <li><span class="key">d</span> - Set cell to default (empty)</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Cell Information</strong>: Cells display the elapsed time (in milliseconds) since they were last updated. This value is calculated as the difference between the
+            <code>viewAt</code> and <code>updatedAt</code> timestamps. These timestamps are recorded before the durable I/O operations, so they represent the actual time taken to replicate the entity
+            state change across regions and prior to updating the view row in each region.
+          </li>
+          <li><strong>Grid Summary</strong>: The top of the grid shows a summary of the total number of cells in each state.</li>
+          <li><strong>Connection Status</strong>: The top bar shows the current connection status and the server endpoint being used.</li>
+        </ul>
+
+        <h3>Grid Navigation:</h3>
+        <p>
+          The grid visualizer implements an <strong>infinite grid viewport</strong> concept. Think of the grid display as a window or viewport into a much larger grid that extends in all directions.
+          The visible cells represent just a small portion of this larger grid, and you can navigate to view different grid locations.
+        </p>
+        <p>Your current position in the grid is displayed at the top of the grid area as "Grid Position: x=X, y=Y", where X and Y are the coordinates of the top-left cell of your viewport.</p>
+
+        <h4>Navigation Commands:</h4>
+        <p>You can navigate the grid using vim-like keyboard commands. Simply type a number followed by one of the command keys:</p>
+
+        <h5>Absolute Positioning:</h5>
+        <ul>
+          <li><span class="key">100x</span> - Move to X-coordinate 100 (sets the left edge of the viewport)</li>
+          <li><span class="key">-50y</span> - Move to Y-coordinate -50 (sets the top edge of the viewport)</li>
+        </ul>
+
+        <h5>Relative Movement:</h5>
+        <ul>
+          <li><span class="key">50h</span> - Move left 50 units (like vim's h key)</li>
+          <li><span class="key">30j</span> - Move down 30 units (like vim's j key)</li>
+          <li><span class="key">20k</span> - Move up 20 units (like vim's k key)</li>
+          <li><span class="key">40l</span> - Move right 40 units (like vim's l key)</li>
+        </ul>
+
+        <p><strong>Notes on Navigation:</strong></p>
+        <ul>
+          <li>All movements are rounded to the nearest 10 units for alignment consistency</li>
+          <li>The grid has boundaries at ±1,000,000 in all directions</li>
+          <li>As you type a command, it appears in the info panel at the top</li>
+          <li>Press <span class="key">Escape</span> to cancel a command in progress</li>
+          <li>Relative movement commands (h/j/k/l) only accept positive numbers</li>
+        </ul>
+
+        <h3>Advanced Features:</h3>
+        <ul>
+          <li>
+            <strong>URL Parameters</strong>: You can customize the polling interval by adding <code>?interval=X</code> to the URL, where X is the interval in milliseconds (default is 2000ms). The
+            <code>routes="region1,region2"</code> (see the <code>application.conf</code> file for more details).
+          </li>
+          <li><strong>Responsive Design</strong>: The grid automatically adjusts to your screen size, showing as many cells as possible while maintaining readability.</li>
+        </ul>
+
+        <h2>Box Selection for Multi-Cell Updates</h2>
+        <p>The grid visualizer includes a powerful box selection feature that allows you to update multiple cells simultaneously:</p>
+
+        <ol>
+          <li>
+            <strong>Enter Selection Mode</strong>: Hold down the <span class="key">Shift</span> key. You'll see a status message indicating "Selection mode active" and the cursor will change to a
+            crosshair.
+          </li>
+          <li>
+            <strong>Select a Region</strong>: While still holding <span class="key">Shift</span>, click on a cell that will be one corner of your selection, then move to the opposite corner. As you
+            move the mouse pointer, you'll see cells highlighted with a dashed outline.
+          </li>
+          <li>
+            <strong>Apply Color</strong>: With cells selected (still holding <span class="key">Shift</span>), press one of the color keys:
+            <ul>
+              <li><span class="key">r</span> - Set all selected cells to <span class="color-box red"></span> red</li>
+              <li><span class="key">g</span> - Set all selected cells to <span class="color-box green"></span> green</li>
+              <li><span class="key">b</span> - Set all selected cells to <span class="color-box blue"></span> blue</li>
+              <li><span class="key">o</span> - Set all selected cells to <span class="color-box orange"></span> orange</li>
+              <li><span class="key">d</span> - Clear all selected cells (default)</li>
+            </ul>
+          </li>
+          <li><strong>Release Selection</strong>: After applying a color, or when you release the <span class="key">Shift</span> key, the selection will be cleared.</li>
+        </ol>
+
+        <br />
+        <h2>Circular Multi-Cell Updates</h2>
+        <p>
+          Another way to perform multi-cell state changes is with a circular generation. Position the mouse pointer on any cell, then enter a number followed by one of the color keys. The mouse
+          position is the center of a circle with a radius of the number entered (in cells). For example, <code>10r</code> will attempt to propagate the red color state to all cells within a circle of
+          radius 10. There are two generation modes: <strong>span</strong> and <strong>fill</strong>.
+        </p>
+        <ul>
+          <li>
+            <strong>Fill Mode:</strong> If the center cell is empty, an attempt is made to set all empty cells within the circle to the specified color. Fill mode does not alter cells that are already
+            in a different color state.
+          </li>
+          <li>
+            <strong>Span Mode:</strong> If the center cell has a color, an attempt is made to update all other color state cells in the circle to match. Span mode does not alter cells that are empty.
+          </li>
+        </ul>
+        <p><strong>How it works:</strong> When the center cell's state is altered, the corresponding Akka SDK entity emits eight events—one for each of its neighboring cells:</p>
+        <pre style="font-size: 0.95em; background: #101825; color: #a7ecff; border-radius: 6px; padding: 8px; line-height: 1.2em">
+            NW   N   NE
+               \ | /
+            W -- C -- E
+               / | \
+            SW   S   SE
+        </pre>
+        <p>
+          An Akka SDK consumer component receives these events and sends a <em>fill</em> or <em>span</em> command to each neighbor entity. Each entity then decides whether to accept the command based
+          on the command type and its own current state. This process can repeat recursively, allowing the color to propagate outward in a circle. As the neighbors receive the command, they may emit
+          events for their own neighbors, and the process continues until the circle is fully propagated or until no more cells can be altered.
+        </p>
+        <p>This mechanism enables rapid propagation of color changes in circular patterns, supporting both contiguous fills and color state region spanning, depending on the starting cell's state.</p>
+
+        <p><strong>Use Cases:</strong> This feature is particularly useful for:</p>
+        <ul>
+          <li>Testing multi-region replication with a large number of cells at once</li>
+          <li>Creating patterns to visualize replication behavior</li>
+          <li>Comparing replication times across different regions</li>
+          <li>Stress-testing the system with many simultaneous updates</li>
+        </ul>
+
+        <p>
+          <strong>Tip:</strong> When using box selection or circular generation in a multi-region deployment, try selecting large areas in one region and observe how quickly the changes propagate to
+          clients connected to other regions. The elapsed time numbers will help you visualize the replication latency across your distributed system.
+        </p>
+
+        <h2>Clear Color and Erase Colors Multi Cell Update</h2>
+        <ul>
+          <li>
+            <strong>Clear Color (<span class="key">c</span> command):</strong>
+            When you press the <span class="key">c</span> key while hovering over a colored cell, the system clears (sets to empty) that cell and all directly adjoining cells that share the same color
+            state. The clear action propagates recursively to neighboring cells with the same color, stopping at boundaries between different colors or empty cells. This is useful for quickly removing
+            a contiguous region of a specific color.
+          </li>
+          <li>
+            <strong>Erase Colors (<span class="key">e</span> command):</strong>
+            When you press the <span class="key">e</span> key while hovering over a colored cell, the system clears (sets to empty) that cell and all adjoining cells, regardless of their color. The
+            erase action propagates recursively to all neighboring colored cells, removing all color states in the connected region. This is useful for wiping out any colored area, regardless of color
+            boundaries.
+          </li>
+        </ul>
+        <p>
+          Both commands use a propagation mechanism similar to the circular fill/span commands: when a cell is cleared or erased, it emits events to its neighbors, which may in turn clear or erase
+          their own neighbors, allowing the action to spread efficiently across the grid.
+        </p>
+
+        <h2>Predators and Prey</h2>
+        <p>
+          The grid simulation includes a dynamic predator-prey ecosystem that demonstrates event-driven entity behavior in a distributed system. Predators hunt and consume prey cells (colored cells)
+          in an autonomous, event-sourced process.
+        </p>
+
+        <h4>Creating Predators:</h4>
+        <p>
+          To create a predator, position your mouse over any cell and type a number followed by the <span class="key">p</span> key. For example, <code>30p</code> creates a predator with an initial
+          energy/range of 30 at the current mouse position.
+        </p>
+
+        <h4>How Predators Hunt:</h4>
+        <ul>
+          <li>
+            <strong>Scent Following:</strong> Predators detect and follow the "scent" of prey cells. Larger clusters of colored cells emit stronger scents, attracting predators more effectively.
+          </li>
+          <li><strong>Movement:</strong> Predators move one cell at a time in the direction of the strongest scent. Each move consumes one unit of energy/range.</li>
+          <li><strong>Consumption:</strong> When a predator moves into a prey cell, it consumes the cell (changing it to empty) and gains energy based on the prey's color.</li>
+        </ul>
+
+        <h4>Prey Energy Values:</h4>
+        <ul>
+          <li><span class="color-box red"></span> Red cells: 1 energy unit (weakest scent)</li>
+          <li><span class="color-box orange"></span> Orange cells: 2 energy units</li>
+          <li><span class="color-box green"></span> Green cells: 3 energy units</li>
+          <li><span class="color-box blue"></span> Blue cells: 4 energy units (strongest scent)</li>
+        </ul>
+
+        <h4>Predator Lifecycle:</h4>
+        <ul>
+          <li><strong>Survival:</strong> Predators must consume prey to survive. If a predator's energy/range reaches zero, it dies.</li>
+          <li><strong>Starvation:</strong> If no prey cells are within range, the predator dies from starvation.</li>
+          <li><strong>Reproduction:</strong> When a predator's energy level reaches a certain threshold, it can spawn child predators, creating a self-sustaining ecosystem.</li>
+        </ul>
+
+        <h4>Technical Implementation:</h4>
+        <p>
+          Predator movement is implemented through Akka SDK's event-sourced entity behavior. When a predator moves to a new cell, it receives information about its next move target through entity
+          events. These entity events are processed by a consumer component that emits commands to the predator entity. The consumer processes predator move events by first retrieving the prey cells
+          within range, and then determining the direction of the cells with the strongest scent. The consumer then sends a move command to the predator entity, which includes the next cell after the
+          move in the direction of the strongest scent. This creates a fully autonomous, event-driven process that demonstrates the power of event sourcing in distributed systems.
+        </p>
+
+        <p>
+          The predator-prey simulation provides a visual demonstration of how event-sourced entities can create complex, autonomous behaviors in a distributed system. Watch as predators hunt across
+          the grid, making decisions based on the state of surrounding cells, all coordinated through behavior of the Akka SDK components in a multi-region distributed system.
+        </p>
+
+        <h2>Grid Cell Information Overlays</h2>
+        <p>
+          Each cell in the grid displays a number representing the elapsed time in milliseconds (<code>elapsedMs</code>). This value provides a real-time measurement of entity state replication and
+          view update latency in the Akka SDK multi-region architecture.
+        </p>
+
+        <p>The visualizer provides two types of detailed information overlays for grid cells:</p>
+
+        <ul>
+          <li>
+            <strong>Timing Overlay (Press <span class="key">t</span> or hover):</strong> This overlay appears either when you press the <span class="key">t</span> key while hovering over a cell, or
+            automatically after hovering over a cell for a short period. It displays:
+            <ul>
+              <li>Cell ID</li>
+              <li>Processing times for each stage of the update pipeline:</li>
+              <li>Endpoint to entity processing time</li>
+              <li>Entity to view processing time for each region</li>
+              <li>A visual graph showing the relative timing differences between regions</li>
+            </ul>
+            This overlay is particularly useful for visualizing cross-region replication latency, as it shows how quickly updates propagate from the primary region (where the entity is hosted) to
+            other regions in the distributed system.
+
+            <div style="text-align: center; margin: 1em">
+              <img src="/static/images/help-cell-timings-overlay.png" alt="Cell Timings Overlay" width="500px" />
+            </div>
+          </li>
+          <li>
+            <strong>Cell State Details Overlay (Press <span class="key">q</span>):</strong> When you hover over a cell and press the <span class="key">q</span> key, a detailed overlay appears showing
+            all state information for that cell, including:
+            <ul>
+              <li>Cell ID and coordinates (x, y)</li>
+              <li>Current status (color)</li>
+              <li>Timestamps for client request, endpoint processing, entity creation, updates, and view updates</li>
+              <li>Elapsed time between updates</li>
+              <li>Region information (where the entity was created, updated, and where the current view is located)</li>
+            </ul>
+            This overlay provides comprehensive information about the cell's current state.
+
+            <div style="text-align: center; margin: 1em">
+              <img src="/static/images/help-cell-state-overlay.png" alt="Cell State Overlay" width="500px" />
+            </div>
+          </li>
+        </ul>
+
+        <p>
+          These overlays provide valuable insights into the performance and behavior of the Akka SDK multi-region architecture, allowing you to visualize exactly how state changes propagate through
+          the distributed system and measure the latency between different regions.
+        </p>
+
+        <h3>Understanding Elapsed Time Display:</h3>
+        <p>
+          Each color state cell displays a number representing the elapsed time in milliseconds (<code>elapsedMs</code>). This value provides a real-time measurement of replication and view update
+          latency in the Akka SDK multi-region architecture. The process works as follows:
+        </p>
+        <ul>
+          <li>
+            <strong>Entity Update (Primary Region):</strong> When a client updates a grid cell, the primary Akka SDK entity for that cell (located in one region) sets its <code>updatedAt</code> state
+            attribute to the current time.
+          </li>
+          <li>
+            <strong>View Row Update (Primary Region):</strong> This entity state change triggers an update of the related view row, which sets its <code>viewAt</code> attribute to the current time.
+            The <code>elapsedMs</code> value is calculated as <code>viewAt - updatedAt</code> and stored in the view row.
+          </li>
+          <li>
+            <strong>Replication to Other Regions:</strong> Each entity state change is replicated to other regions. When the entity is updated in another region, it triggers a region-local view row
+            update. <em>The entity's <code>updatedAt</code> is not changed during replication.</em>
+          </li>
+          <li>
+            <strong>View Row Update (Replicated Region):</strong> The local view row in the replicated region is updated, setting its own <code>viewAt</code> to the current time and recalculating
+            <code>elapsedMs = viewAt - updatedAt</code> using the original <code>updatedAt</code> from the primary region.
+          </li>
+          <li>
+            <strong>Elapsed Time Meaning:</strong> As a result, the <code>elapsedMs</code> for each grid cell reflects the time taken to replicate the entity state change across regions and update the
+            view row in each region. This includes cross-region replication time and any processing delay in updating the view.
+          </li>
+        </ul>
+        <p>
+          <b>NOTE:</b> The elapsed time is calculated as the difference between the <code>viewAt</code> and <code>updatedAt</code> timestamps. These timestamps are recorded before the durable I/O
+          operations, so they represent the actual time taken to replicate the entity state change across regions and prior to updating the view row in each region.
+        </p>
+        <p>
+          This approach provides a real-time visualization of distributed system latency and cross-region replication performance. When you see a cell's elapsed time, it shows how long it took for an
+          update in the primary region to be reflected in the current region's view.
+        </p>
+      </div>
+
+      <div class="section">
+        <h2>AI Agent</h2>
+        <p>
+          The grid visualizer includes an AI-powered agent that can understand and execute voice commands to manipulate the grid. This feature allows for natural language interaction with the grid
+          system.
+        </p>
+
+        <h3>How to Use the AI Agent:</h3>
+        <ul>
+          <li><strong>Activate Recording</strong>: Click the record button in the top left of the web UI or press the <span class="key">m</span> key to start recording your voice command.</li>
+          <li><strong>Speak Your Command</strong>: Give instructions like "create a blue square at the center" or "place three red cells in a row".</li>
+          <li><strong>Stop Recording</strong>: Click the record button or press <span class="key">m</span> again to stop recording.</li>
+          <li><strong>Processing</strong>: Your audio is sent to the backend where it's processed through a three-stage AI pipeline.</li>
+          <li><strong>Results</strong>: Watch as your commands are interpreted and executed on the grid in real-time.</li>
+        </ul>
+
+        <h3>AI Agent Processing Pipeline:</h3>
+        <ol>
+          <li>
+            <strong>Stage 1: Audio Transcription</strong>
+            <ul>
+              <li>The audio recording is transcribed to text</li>
+              <li>This text becomes the basis for further processing</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Stage 2: Command Interpretation</strong>
+            <ul>
+              <li>The transcribed text is augmented with system context from the grid-agent-system-prompt</li>
+              <li>Additional context like viewport coordinates and mouse position is included</li>
+              <li>An LLM analyzes this enhanced prompt to identify specific grid-related actions</li>
+              <li>The output is a structured list of actionable grid operations</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Stage 3: Tool Selection & Execution</strong>
+            <ul>
+              <li>Each action from Stage 2 is processed individually</li>
+              <li>The action is enhanced with another system prompt that instructs the LLM to identify specific tools</li>
+              <li>The LLM generates a list of tool invocations that will accomplish the requested action</li>
+              <li>These tools are executed by the agent to manipulate the grid</li>
+            </ul>
+          </li>
+        </ol>
+
+        <p>
+          This multi-stage approach allows for flexible and intuitive interaction with the grid system. You can create complex patterns, manipulate multiple cells, or perform advanced operations using
+          natural language rather than keyboard commands.
+        </p>
+
+        <p>
+          <strong>Example Commands:</strong>
+        </p>
+        <ul>
+          <li>"Create a 5x5 red square at my current position"</li>
+          <li>"Draw a blue circle with radius 10"</li>
+          <li>"Place three predators in a triangle pattern"</li>
+          <li>"Clear all cells in the visible area"</li>
+        </ul>
+
+        <h3>Viewing the AI Agent Pipeline Steps</h3>
+        <p>The AI agent pipeline steps are visible in the web interface by pressing the <span class="key">m</span> key.</p>
+
+        <div style="text-align: center; margin: 1em">
+          <img src="/static/images/grid-agent-steps-overlay.png" alt="Grid Agent Steps Overlay" width="500px" />
+        </div>
+
+        <p>Use the up and down arrow keys to navigate through the pipeline steps. Press the <span class="key">m</span> key or escape key to exit the pipeline steps view.</p>
+
+        <h2>How the Akka Service Works</h2>
+        <p>This application demonstrates several key features of Akka's architecture and capabilities:</p>
+
+        <div class="diagram">
+          <pre>
+┌─────────────────────────────────────────────────────────┐
+│                      Web Browser                        │
+│                                                         │
+│  ┌─────────────┐     ┌─────────────┐    ┌────────────┐  │
+│  │ HTTP Fetch  │     │ Server-Sent │    │ User Input │  │
+│  │ (List View) │     │   Events    │    │ (Keyboard) │  │
+│  └──────┬──────┘     └──────┬──────┘    └──────┬─────┘  │
+└─────────┼─────────────────────────────────────┼─────────┘
+          │                   │                 │
+          ▼                   ▼                 ▼
+┌─────────────────────────────────────────────────────────┐
+│                     Akka HTTP Server                    │
+│                                                         │
+│  ┌─────────────┐     ┌─────────────┐    ┌────────────┐  │
+│  │  View List  │     │ View Stream │    │   Update   │  │
+│  │  Endpoint   │     │  Endpoint   │    │  Endpoint  │  │
+│  └──────┬──────┘     └──────┬──────┘    └──────┬─────┘  │
+└─────────┼─────────────────────────────────────┼─────────┘
+          │                   │                 │
+          ▼                   ▼                 ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Akka Component System                  │
+│                                                         │
+│  ┌───────────────┐                    ┌──────────────┐  │
+│  │ GridCellView  │◄───────────────────┤GridCellEntity│  │
+│  │    (View)     │                    │ (Entity)     │  │
+│  └───────────────┘                    └──────────────┘  │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+          </pre>
+        </div>
+
+        <h3>Key Components:</h3>
+        <ul>
+          <li><strong>Event Sourcing</strong>: Each cell is an Event Sourced Entity (<code>GridCellEntity</code>) that maintains its state through events.</li>
+          <li>
+            <strong>Views</strong>: The <code>GridCellView</code> component provides two ways to access the data:
+            <ul>
+              <li><code>getViewList</code>: Returns a snapshot of all cells as a list</li>
+              <li><code>getViewStream</code>: Provides a real-time stream of cell updates</li>
+            </ul>
+          </li>
+          <li>
+            <strong>HTTP API</strong>: The <code>GridCellEndpoint</code> exposes these capabilities through HTTP:
+            <ul>
+              <li><code>/grid-cell/view/list</code>: HTTP endpoint to get all cells</li>
+              <li><code>/grid-cell/view/stream</code>: Server-Sent Events (SSE) endpoint for real-time updates</li>
+              <li><code>/grid-cell/update-status</code>: HTTP PUT endpoint to update a cell's status</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Client-Side Integration</strong>: The JavaScript client uses:
+            <ul>
+              <li>HTTP fetch for initial state and polling updates</li>
+              <li>EventSource API for real-time SSE updates</li>
+              <li>HTTP PUT requests to send updates to the server</li>
+            </ul>
+          </li>
+        </ul>
+
+        <h3>Technical Details:</h3>
+        <ul>
+          <li>
+            <strong>Optimizations</strong>:
+            <ul>
+              <li>Cell updates only occur when the status actually changes</li>
+              <li>The server avoids persisting events when setting a default cell back to default</li>
+              <li>Both polling and streaming are used for maximum reliability</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Scalability</strong>: This architecture can scale to handle thousands of concurrent users and cells, as Akka's distributed nature allows entities to be spread across multiple
+            nodes.
+          </li>
+        </ul>
+      </div>
+
+      <a href="index.html" class="back-link">Return to Grid Demo</a>
+    </div>
+  </body>
+</html>

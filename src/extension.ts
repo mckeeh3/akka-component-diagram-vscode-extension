@@ -6,6 +6,7 @@ import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './p
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 import { createPrefixedLogger } from './utils/logger';
 import { generateMermaidDiagram, generateSimpleMermaidDiagram } from './utils/mermaidGenerator';
+import { ComponentDiagramController } from './parsers/componentDiagramController';
 
 // Helper function to aggregate CST edges
 function aggregateCstEdges(edges: AkkaEdge[]): AkkaEdge[] {
@@ -323,12 +324,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Get the source text for the file
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
-            result.cst,
-            result.filename,
-            sourceText,
-            outputChannel,
-          );
+          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           if (connections.length > 0) {
             log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
@@ -568,225 +564,28 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage(`Scanning ${javaFiles.length} Java file(s) for CST diagram...`);
       log(`Found ${javaFiles.length} Java files to scan for CST diagram`);
 
-      // --- Java Parser Step ---
-      log(`========================================`);
-      log(`STARTING CST-ONLY DIAGRAM GENERATION`);
-      log(`========================================`);
-      log(`Starting Java parser for ${javaFiles.length} files`);
+      // Use the controller for all processing steps
+      log('========================================');
+      log('USING COMPONENT DIAGRAM CONTROLLER FOR CST DIAGRAM');
+      log('========================================');
+      const controller = new ComponentDiagramController(outputChannel);
+      const result = await controller.processProject(javaFiles);
 
-      const parseResults = await JavaParser.parseFiles(javaFiles, outputChannel);
-      log(`Java parser completed, processing ${parseResults.length} results`);
+      log(`Controller result: ${result.nodes.length} nodes, ${result.edges.length} edges`);
+      result.nodes.forEach((node, i) => log(`  Node ${i + 1}: ${node.name} (${node.type})`));
+      result.edges.forEach((edge, i) => log(`  Edge ${i + 1}: ${edge.source} -> ${edge.target} (${edge.label})`));
 
-      // Count successes and failures
-      const successfulParses = parseResults.filter((r) => r.success);
-      const failedParses = parseResults.filter((r) => !r.success);
-
-      log(`Java parsing complete. Success: ${successfulParses.length}, Failures: ${failedParses.length}`);
-
-      // Show user feedback
-      if (failedParses.length > 0) {
-        failedParses.forEach((result) => {
-          vscode.window.showWarningMessage(`Failed to parse Java file: ${path.basename(result.filename)}`);
-          log(`Parse failed: ${result.filename} - ${result.error}`);
-        });
-      }
-
-      vscode.window.showInformationMessage(`Java parser: ${successfulParses.length} files parsed successfully, ${failedParses.length} failures`);
-
-      // --- Extract Akka Components from CST ---
-      log(`Starting Akka component extraction from CST...`);
-
-      const allAkkaComponents: Array<{
-        filename: string;
-        className: string;
-        componentType: string;
-        componentId: string;
-      }> = [];
-
-      for (const result of successfulParses) {
-        if (result.cst) {
-          const components = JavaParser.extractAkkaComponentsFromCST(result.cst, result.filename);
-          allAkkaComponents.push(...components);
-
-          log(`File ${path.basename(result.filename)}: Found ${components.length} Akka components`);
-
-          // Log each component for debugging
-          components.forEach((component, index) => {
-            log(`  Component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
-          });
-        }
-      }
-
-      log(`Found ${allAkkaComponents.length} Akka components across all files`);
-
-      if (allAkkaComponents.length > 0) {
-        allAkkaComponents.forEach((component, index) => {
-          log(`  Akka component ${index + 1}: ${component.className} (${component.componentType}) - ID: ${component.componentId}`);
-        });
-      }
-
-      // --- CST-based Edge Detection ---
-      log(`========================================`);
-      log(`STARTING CST-BASED EDGE DETECTION`);
-      log(`========================================`);
-      log(`Starting CST-based edge detection...`);
-      const cstEdges: AkkaEdge[] = [];
-      const allCstTopicNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      const allCstServiceStreamNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-      const allCstToolNodes: Array<{ id: string; name: string; type: string; uri: vscode.Uri }> = [];
-
-      for (const result of successfulParses) {
-        if (result.cst) {
-          log(`Processing CST for file: ${path.basename(result.filename)}`);
-          // Get the source text for the file
-          const document = await vscode.workspace.openTextDocument(result.filename);
-          const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
-            result.cst,
-            result.filename,
-            sourceText,
-            outputChannel,
-          );
-
-          if (connections.length > 0) {
-            log(`  Found ${connections.length} connections in ${path.basename(result.filename)}:`);
-            connections.forEach((conn, index) => {
-              const edge: AkkaEdge = {
-                source: conn.source,
-                target: conn.target,
-                label: conn.label,
-                details: conn.details,
-              };
-              cstEdges.push(edge);
-              log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})`);
-              if (conn.details && conn.details.length > 0) {
-                let detailsStr = conn.details && conn.details.length > 0 ? ` [Details: ${conn.details.join(', ')}]` : '';
-                log(`    Connection ${index + 1}: ${conn.source} -> ${conn.target} (${conn.label})${detailsStr}`);
-                log(`      Details: ${conn.details.join(', ')}`);
-                // Add specific logging for method names
-                if (conn.details.length > 0) {
-                  log(`      Method names: ${conn.details.join(', ')}`);
-                }
-              }
-            });
-          } else {
-            log(`  No connections found in ${path.basename(result.filename)}`);
-          }
-
-          // Add topic nodes to the global collection (avoiding duplicates)
-          topicNodes.forEach((topic) => {
-            if (!allCstTopicNodes.find((t) => t.id === topic.id)) {
-              allCstTopicNodes.push(topic);
-            }
-          });
-
-          // Add service stream nodes to the global collection (avoiding duplicates)
-          serviceStreamNodes.forEach((stream: { id: string; name: string; type: string; uri: vscode.Uri }) => {
-            if (!allCstServiceStreamNodes.find((s) => s.id === stream.id)) {
-              allCstServiceStreamNodes.push(stream);
-            }
-          });
-
-          // Add tool nodes to the global collection (avoiding duplicates)
-          toolNodes.forEach((tool) => {
-            if (!allCstToolNodes.find((t) => t.id === tool.id)) {
-              allCstToolNodes.push(tool);
-            }
-          });
-        }
-      }
-
-      log(`CST-based edge detection complete. Found ${cstEdges.length} edges`);
-      if (cstEdges.length > 0) {
-        log(`Found ${cstEdges.length} edges from CST-based detection:`);
-        cstEdges.forEach((edge, index) => {
-          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`  Edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
-          // Add specific logging for method names
-          if (edge.details && edge.details.length > 0) {
-            log(`    Method names: ${edge.details.join(', ')}`);
-          }
-        });
-        log(`CST-based edge detection ===== end edge lists. `);
-      } else {
-        log(`No edges found from CST-based detection`);
-      }
-
-      log(`Found ${allCstTopicNodes.length} unique topic nodes across all files`);
-      allCstTopicNodes.forEach((topic, index) => {
-        log(`  Topic ${index + 1}: ${topic.id} (${topic.name}) - ${topic.type}`);
-      });
-
-      log(`Found ${allCstServiceStreamNodes.length} unique service stream nodes across all files`);
-      allCstServiceStreamNodes.forEach((stream: { id: string; name: string; type: string; uri: vscode.Uri }, index) => {
-        log(`  Service Stream ${index + 1}: ${stream.id} (${stream.name}) - ${stream.type}`);
-      });
-
-      log(`Found ${allCstToolNodes.length} unique tool nodes across all files`);
-      allCstToolNodes.forEach((tool: any, index: any) => {
-        log(`  Tool ${index + 1}: ${tool.id} (${tool.name}) - ${tool.type}`);
-      });
-
-      // Convert CST components to AkkaComponent format
-      const cstNodes: AkkaComponent[] = allAkkaComponents.map((component) => ({
-        id: component.className,
-        name: component.componentId || component.className,
-        type: component.componentType,
-        uri: vscode.Uri.file(component.filename),
-      }));
-
-      // --- Load saved layouts from workspace state ---
+      // Load saved layouts from workspace state
       const savedCstNodeLayout = context.workspaceState.get<{ [id: string]: { x: number; y: number } }>('akkaCstDiagramLayout', {});
       const savedCstViewState = context.workspaceState.get<ViewState>('akkaCstDiagramViewState', { panX: 0, panY: 0, scale: 1 });
 
-      const cstNodesWithLayout = cstNodes.map((node) => ({
+      // Apply saved layout to nodes
+      const nodesWithLayout = result.nodes.map((node) => ({
         ...node,
         ...savedCstNodeLayout[node.id], // Apply saved coordinates if they exist
       }));
 
-      // Convert topic nodes to AkkaComponent format and add to CST diagram
-      const cstTopicComponents: AkkaComponent[] = allCstTopicNodes.map((topic) => ({
-        id: topic.id,
-        name: topic.name,
-        type: topic.type,
-        uri: topic.uri,
-      }));
-
-      // Convert service stream nodes to AkkaComponent format and add to CST diagram
-      const cstServiceStreamComponents: AkkaComponent[] = allCstServiceStreamNodes.map((stream) => ({
-        id: stream.id,
-        name: stream.name,
-        type: stream.type,
-        uri: stream.uri,
-      }));
-
-      // Convert tool nodes to AkkaComponent format and add to diagram
-      const cstToolComponents: AkkaComponent[] = allCstToolNodes.map((tool) => ({
-        id: tool.id,
-        name: tool.name,
-        type: tool.type,
-        uri: tool.uri,
-      }));
-
-      // Combine regular nodes, topic nodes, service stream nodes, and tool nodes
-      const allCstNodes = [...cstNodesWithLayout, ...cstTopicComponents, ...cstServiceStreamComponents, ...cstToolComponents];
-
-      // Aggregate CST edges to consolidate multiple method calls between the same components
-      const aggregatedCstEdges = aggregateCstEdges(cstEdges);
-      log(`CST edge aggregation: ${cstEdges.length} individual edges -> ${aggregatedCstEdges.length} consolidated edges`);
-
-      if (aggregatedCstEdges.length > 0) {
-        log(`Aggregated CST edges:`);
-        aggregatedCstEdges.forEach((edge: AkkaEdge, index: number) => {
-          let detailsStr = edge.details && edge.details.length > 0 ? ` [Details: ${edge.details.join(', ')}]` : '';
-          log(`  Aggregated edge ${index + 1}: ${edge.source} -> ${edge.target} (${edge.label})${detailsStr}`);
-          if (edge.details && edge.details.length > 0) {
-            log(`    Method names: ${edge.details.join(', ')}`);
-          }
-        });
-      }
-
-      const cstDiagramData = { nodes: allCstNodes, edges: aggregatedCstEdges };
+      const cstDiagramData = { nodes: nodesWithLayout, edges: result.edges };
 
       // --- Create the CST Webview Panel ---
       if (cstDiagramData.nodes.length > 0) {
@@ -968,12 +767,7 @@ export function activate(context: vscode.ExtensionContext) {
           // Extract connections and nodes
           const document = await vscode.workspace.openTextDocument(result.filename);
           const sourceText = document.getText();
-          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(
-            result.cst,
-            result.filename,
-            sourceText,
-            outputChannel,
-          );
+          const { connections, topicNodes, serviceStreamNodes, toolNodes } = extractComponentConnectionsFromCST(result.cst, result.filename, sourceText, outputChannel);
 
           // Add connections
           connections.forEach((conn) => {

@@ -37,8 +37,26 @@ export function extractSourceAtLocation(sourceText: string, location: { startOff
  * @param outputChannel Optional VS Code output channel for logging
  * @returns Array of connections: { sourceClass, targetType, targetClass, methodName, location }
  */
-export function extractComponentConnectionsFromCST(cst: any, filename: string, sourceText?: string, outputChannel?: vscode.OutputChannel) {
+export function extractComponentConnectionsFromCST(
+  cst: any,
+  filename: string,
+  sourceText?: string,
+  outputChannel?: vscode.OutputChannel,
+  allComponents?: Array<{ className: string; componentType: string }>
+) {
+  console.log('[DEBUG] Top of extractComponentConnectionsFromCST');
   const log = outputChannel ? createPrefixedLogger(outputChannel, '[CSTUtils]') : console.log;
+
+  log('[DEBUG] Top of extractComponentConnectionsFromCST');
+  log(`========================================`);
+  log(`STARTING CST-BASED EDGE DETECTION FOR: ${filename}`);
+  log(`========================================`);
+  log(`All components available for reference detection: ${allComponents ? allComponents.length : 0}`);
+  if (allComponents && allComponents.length > 0) {
+    allComponents.forEach((comp, index) => {
+      log(`  Component ${index + 1}: ${comp.className} (${comp.componentType})`);
+    });
+  }
 
   const connections: Array<{
     source: string;
@@ -259,12 +277,52 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
                     if (toolsMatch) {
                       const toolArgs = toolsMatch[1].split(',').map((arg) => arg.trim());
                       for (const arg of toolArgs) {
-                        const toolName = arg.replace(/\.class$/, '');
-                        const toolId = `tool:${toolName}`;
-                        if (!toolNodes.find((t) => t.id === toolId)) {
-                          toolNodes.push({ id: toolId, name: toolName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                        // Handle different tool argument patterns
+                        let toolName = arg.replace(/\.class$/, '');
+
+                        // Handle List.of() patterns with multiple tool instances
+                        if (toolName.includes('List.of(')) {
+                          const listMatch = toolName.match(/List\.of\(([^)]+)\)/);
+                          if (listMatch) {
+                            const listArgs = listMatch[1].split(',').map((listArg) => listArg.trim());
+                            log(`[Tool Detection] Found List.of() with ${listArgs.length} arguments: ${listArgs.join(', ')}`);
+                            for (const listArg of listArgs) {
+                              // Extract tool class name from constructor calls like "new DrawRectangleTool(...)"
+                              const constructorMatch = listArg.match(/new\s+(\w+)\s*\(/);
+                              if (constructorMatch) {
+                                const toolClassName = constructorMatch[1];
+                                log(`[Tool Detection] Found tool constructor: ${toolClassName}`);
+                                const toolId = `tool:${toolClassName}`;
+                                if (!toolNodes.find((t) => t.id === toolId)) {
+                                  toolNodes.push({ id: toolId, name: toolClassName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                                }
+                                connections.push({ source: className, target: toolId, label: 'uses tool', details: [] });
+                                log(`[Tool Detection] Found tool in List.of(): ${toolClassName}`);
+                              } else {
+                                // Handle case where tool is referenced as a class name without constructor
+                                const classMatch = listArg.match(/^(\w+)$/);
+                                if (classMatch) {
+                                  const toolClassName = classMatch[1];
+                                  log(`[Tool Detection] Found tool class reference: ${toolClassName}`);
+                                  const toolId = `tool:${toolClassName}`;
+                                  if (!toolNodes.find((t) => t.id === toolId)) {
+                                    toolNodes.push({ id: toolId, name: toolClassName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                                  }
+                                  connections.push({ source: className, target: toolId, label: 'uses tool', details: [] });
+                                  log(`[Tool Detection] Found tool class reference: ${toolClassName}`);
+                                }
+                              }
+                            }
+                          }
+                        } else {
+                          // Handle simple variable references
+                          const toolId = `tool:${toolName}`;
+                          if (!toolNodes.find((t) => t.id === toolId)) {
+                            toolNodes.push({ id: toolId, name: toolName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                          }
+                          connections.push({ source: className, target: toolId, label: 'uses tool', details: [] });
+                          log(`[Tool Detection] Found tool reference: ${toolName}`);
                         }
-                        connections.push({ source: className, target: toolId, label: 'uses tool', details: [] });
                       }
                     }
 
@@ -536,6 +594,174 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
     }
 
     searchForClientChains(blockStmt);
+  }
+
+  // Helper: find component-to-component connections by scanning for class name references
+  function findComponentReferences(cst: any, allComponents: Array<{ className: string; componentType: string }>, className: string) {
+    log(`[DEBUG] Entered findComponentReferences for class: ${className}`);
+    if (!cst || !allComponents || allComponents.length === 0) {
+      log(`[Component Reference Detection] Skipping - no CST or components available`);
+      return;
+    }
+
+    // Get all component class names for reference (including tool classes)
+    const componentClassNames = allComponents.map((comp) => comp.className);
+    log(`[Component Reference Detection] Looking for references to: ${componentClassNames.join(', ')}`);
+
+    let referenceCount = 0;
+
+    function searchForComponentReferences(node: any, depth = 0) {
+      if (!node || typeof node !== 'object') return;
+      // Check if this node itself has an image that matches a component class name
+      if (node.image) {
+        // if (className === 'VisualizerAgent') {
+        //   log(`[Component Reference Detection] Depth ${depth} Node image: ${node.image}`);
+        // }
+        const referencedClassName = node.image;
+        if (componentClassNames.includes(referencedClassName) && referencedClassName !== className) {
+          log(`[Component Reference Detection] Found reference to component: ${referencedClassName} in ${className}`);
+          connections.push({
+            source: className,
+            target: referencedClassName,
+            label: 'references',
+            details: [],
+          });
+          referenceCount++;
+        }
+      }
+      if (node.children) {
+        for (const [key, children] of Object.entries(node.children)) {
+          if (Array.isArray(children)) {
+            for (const child of children) {
+              if (child && typeof child === 'object') {
+                searchForComponentReferences(child, depth + 1);
+              }
+            }
+          } else if (children && typeof children === 'object') {
+            searchForComponentReferences(children, depth + 1);
+          }
+        }
+      }
+    }
+
+    searchForComponentReferences(cst);
+    log(`[Component Reference Detection] Found ${referenceCount} references from ${className} to other components`);
+  }
+
+  // Helper: find tool-related field declarations and their initialization
+  function findToolFieldDeclarations(classBodyDecls: any[], className: string) {
+    for (const bodyDecl of classBodyDecls) {
+      if (bodyDecl.children && bodyDecl.children.classMemberDeclaration) {
+        const memberDecl = bodyDecl.children.classMemberDeclaration[0];
+
+        // Check for field declarations
+        if (memberDecl.children && memberDecl.children.fieldDeclaration) {
+          const fieldDecl = memberDecl.children.fieldDeclaration[0];
+          if (fieldDecl.children && fieldDecl.children.variableDeclaratorList) {
+            const varDeclList = fieldDecl.children.variableDeclaratorList[0];
+            if (varDeclList.children && varDeclList.children.variableDeclarator) {
+              for (const varDecl of varDeclList.children.variableDeclarator) {
+                if (varDecl.children && varDecl.children.variableDeclaratorId) {
+                  const varId = varDecl.children.variableDeclaratorId[0];
+                  if (varId.children && varId.children.Identifier) {
+                    const fieldName = varId.children.Identifier[0].image;
+
+                    // Check if this looks like a tool collection field
+                    if (fieldName.toLowerCase().includes('tool') || fieldName.toLowerCase().includes('function')) {
+                      log(`[Tool Detection] Found potential tool field: ${fieldName}`);
+
+                      // Check for initialization
+                      if (varDecl.children && varDecl.children.variableInitializer) {
+                        const init = varDecl.children.variableInitializer[0];
+                        if (init.location && sourceText) {
+                          const initText = extractSourceAtLocation(sourceText, init.location);
+                          log(`[Tool Detection] Tool field initialization: ${initText}`);
+
+                          // Look for List.of() patterns in initialization
+                          const listMatch = initText.match(/List\.of\(([^)]+)\)/);
+                          if (listMatch) {
+                            const listArgs = listMatch[1].split(',').map((arg) => arg.trim());
+                            for (const arg of listArgs) {
+                              const constructorMatch = arg.match(/new\s+(\w+)\s*\(/);
+                              if (constructorMatch) {
+                                const toolClassName = constructorMatch[1];
+                                const toolId = `tool:${toolClassName}`;
+                                if (!toolNodes.find((t) => t.id === toolId)) {
+                                  toolNodes.push({ id: toolId, name: toolClassName, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                                }
+                                connections.push({ source: className, target: toolId, label: 'defines tool', details: [] });
+                                log(`[Tool Detection] Found tool in field initialization: ${toolClassName}`);
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Helper: find tool class definitions and their methods
+  function findToolClassDefinitions(cst: any) {
+    if (!cst.children || !cst.children.ordinaryCompilationUnit) return;
+
+    const compilationUnit = cst.children.ordinaryCompilationUnit[0];
+    if (!compilationUnit.children || !compilationUnit.children.typeDeclaration) return;
+
+    for (const typeDecl of compilationUnit.children.typeDeclaration) {
+      if (typeDecl.children && typeDecl.children.classDeclaration) {
+        const classDecl = typeDecl.children.classDeclaration[0];
+        if (classDecl.children && classDecl.children.normalClassDeclaration) {
+          const normalClass = classDecl.children.normalClassDeclaration[0];
+          const className = getClassName(classDecl);
+
+          if (!className) continue;
+
+          // Check if this class has @FunctionTool methods
+          if (normalClass.children && normalClass.children.classBody) {
+            const classBody = normalClass.children.classBody[0];
+            if (classBody.children && classBody.children.classBodyDeclaration) {
+              const classBodyDecls = classBody.children.classBodyDeclaration;
+
+              // Check for @FunctionTool methods in this class
+              for (const bodyDecl of classBodyDecls) {
+                if (bodyDecl.children && bodyDecl.children.classMemberDeclaration) {
+                  const memberDecl = bodyDecl.children.classMemberDeclaration[0];
+                  if (memberDecl.children && memberDecl.children.methodDeclaration) {
+                    const methodDecl = memberDecl.children.methodDeclaration[0];
+                    if (methodDecl.children && methodDecl.children.methodModifier) {
+                      for (const modifier of methodDecl.children.methodModifier) {
+                        if (modifier.children && modifier.children.annotation) {
+                          for (const annotation of modifier.children.annotation) {
+                            if (annotation.location && sourceText) {
+                              const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+                              if (annotationText.startsWith('@FunctionTool')) {
+                                const methodName = methodDecl.children.methodHeader[0].children.methodDeclarator[0].children.Identifier[0].image;
+                                const toolId = `tool:${className}.${methodName}`;
+                                if (!toolNodes.find((t) => t.id === toolId)) {
+                                  toolNodes.push({ id: toolId, name: `${className}.${methodName}`, type: 'FunctionTool', uri: vscode.Uri.file(filename) });
+                                }
+                                log(`[Tool Detection] Found tool class method: ${className}.${methodName}`);
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // Helper: find methods annotated with @FunctionTool
@@ -834,6 +1060,7 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
       if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
         const classDecl = typeDecl.children.classDeclaration[0];
         const className = getClassName(typeDecl);
+        log(`[DEBUG] Processing class: ${className}`);
         if (classDecl.children.normalClassDeclaration[0].children.classBody && classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration) {
           const classBodyDecls = classDecl.children.normalClassDeclaration[0].children.classBody[0].children.classBodyDeclaration;
           const clientFieldNames = findComponentClientFieldNames(classBodyDecls);
@@ -844,7 +1071,20 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
           }
 
           if (className) {
+            log(`[DEBUG] Entering className block for: ${className}`);
+            log(`========================================`);
+            log(`PROCESSING CLASS: ${className}`);
+            log(`========================================`);
+
+            log(`--- Stage 1: Function Tool Annotations ---`);
             findFunctionToolAnnotations(classBodyDecls, className);
+            log(`--- Stage 1 Complete ---`);
+
+            log(`--- Stage 2: Tool Field Declarations ---`);
+            findToolFieldDeclarations(classBodyDecls, className);
+            log(`--- Stage 2 Complete ---`);
+
+            // Component reference detection will be done after all components are detected
           }
 
           classBodyDecls.forEach((bodyDecl: any) => {
@@ -866,12 +1106,201 @@ export function extractComponentConnectionsFromCST(cst: any, filename: string, s
   }
 
   // Extract all annotations and process consume, topic, and service stream annotations
+  log(`========================================`);
+  log(`STAGE 4: ANNOTATION PROCESSING`);
+  log(`========================================`);
   log(`Extracting all annotations from CST...`);
   const allAnnotations = extractAllAnnotations(cst);
   log(`Found ${allAnnotations.length} total annotations`);
   extractConsumeAnnotationsFromList(allAnnotations);
   extractTopicAnnotationsFromList(allAnnotations);
   extractServiceStreamAnnotationsFromList(allAnnotations);
+  findToolClassDefinitions(cst);
+  log(`--- Stage 4 Complete ---`);
+
+  // Stage 5: Component Reference Detection (after all components are detected)
+  log(`========================================`);
+  log(`STAGE 5: COMPONENT REFERENCE DETECTION`);
+  log(`========================================`);
+
+  // Build complete list of all components including function tools
+  const allComponentsForReference = [...(allComponents || [])];
+
+  // Add function tool classes detected in this file
+  toolNodes.forEach((tool) => {
+    const toolClassName = tool.name.split('.')[0]; // Extract class name from tool name
+    if (!allComponentsForReference.find((c) => c.className === toolClassName)) {
+      allComponentsForReference.push({
+        className: toolClassName,
+        componentType: 'FunctionTool',
+      });
+    }
+  });
+
+  log(`Total components for reference detection: ${allComponentsForReference.length}`);
+  allComponentsForReference.forEach((comp, index) => {
+    log(`  Component ${index + 1}: ${comp.className} (${comp.componentType})`);
+  });
+
+  // Now scan each class for references to other components
+  if (cst.children && cst.children.ordinaryCompilationUnit && cst.children.ordinaryCompilationUnit[0].children.typeDeclaration) {
+    cst.children.ordinaryCompilationUnit[0].children.typeDeclaration.forEach((typeDecl: any) => {
+      if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
+        const classDecl = typeDecl.children.classDeclaration[0];
+        const className = getClassName(typeDecl);
+
+        if (className && allComponentsForReference.length > 0) {
+          log(`Scanning ${className} for references to ${allComponentsForReference.length} components...`);
+          findComponentReferences(cst, allComponentsForReference, className);
+        }
+      }
+    });
+  }
+
+  log(`--- Stage 5 Complete ---`);
+
+  // Final results summary
+  log(`========================================`);
+  log(`CST-BASED EDGE DETECTION COMPLETE FOR: ${filename}`);
+  log(`========================================`);
+  log(`Final Results:`);
+  log(`  - Connections found: ${connections.length}`);
+  log(`  - Topic nodes found: ${topicNodes.length}`);
+  log(`  - Service stream nodes found: ${serviceStreamNodes.length}`);
+  log(`  - Tool nodes found: ${toolNodes.length}`);
+
+  if (connections.length > 0) {
+    log(`  - Connection details:`);
+    connections.forEach((conn, index) => {
+      log(`    ${index + 1}. ${conn.source} -> ${conn.target} (${conn.label})`);
+    });
+  }
 
   return { connections, topicNodes, serviceStreamNodes, toolNodes };
+}
+
+// Helper: detect function tool classes from CST
+export function detectFunctionToolClasses(cst: any, filename: string, sourceText?: string, outputChannel?: vscode.OutputChannel) {
+  const log = outputChannel ? createPrefixedLogger(outputChannel, '[FunctionToolDetection]') : console.log;
+
+  log(`========================================`);
+  log(`DETECTING FUNCTION TOOL CLASSES FOR: ${filename}`);
+  log(`========================================`);
+
+  const functionToolClasses: Array<{ className: string; componentType: string; filename: string }> = [];
+
+  if (!cst.children || !cst.children.ordinaryCompilationUnit) {
+    log(`No compilation unit found in CST`);
+    return functionToolClasses;
+  }
+
+  const compilationUnit = cst.children.ordinaryCompilationUnit[0];
+  if (!compilationUnit.children || !compilationUnit.children.typeDeclaration) {
+    log(`No type declarations found in compilation unit`);
+    return functionToolClasses;
+  }
+
+  for (const typeDecl of compilationUnit.children.typeDeclaration) {
+    if (typeDecl.children && typeDecl.children.classDeclaration) {
+      const classDecl = typeDecl.children.classDeclaration[0];
+      if (classDecl.children && classDecl.children.normalClassDeclaration) {
+        const normalClass = classDecl.children.normalClassDeclaration[0];
+
+        // Extract class name
+        let className = null;
+        if (normalClass.children && normalClass.children.typeIdentifier) {
+          const typeId = normalClass.children.typeIdentifier[0];
+          if (typeId.image) {
+            className = typeId.image;
+          } else if (typeId.children && typeId.children.Identifier) {
+            className = typeId.children.Identifier[0].image;
+          }
+        }
+
+        if (!className) {
+          log(`Could not extract class name from class declaration`);
+          continue;
+        }
+
+        log(`Checking class: ${className} for @FunctionTool annotation`);
+
+        // Check for @FunctionTool annotation
+        if (normalClass.children && normalClass.children.classBody) {
+          const classBody = normalClass.children.classBody[0];
+          if (classBody.children && classBody.children.classBodyDeclaration) {
+            const classBodyDecls = classBody.children.classBodyDeclaration;
+
+            // Check for @FunctionTool annotation on the class
+            let hasFunctionToolAnnotation = false;
+
+            for (const bodyDecl of classBodyDecls) {
+              if (bodyDecl.children && bodyDecl.children.classMemberDeclaration) {
+                const memberDecl = bodyDecl.children.classMemberDeclaration[0];
+                if (memberDecl.children && memberDecl.children.methodDeclaration) {
+                  const methodDecl = memberDecl.children.methodDeclaration[0];
+                  if (methodDecl.children && methodDecl.children.methodModifier) {
+                    for (const modifier of methodDecl.children.methodModifier) {
+                      if (modifier.children && modifier.children.annotation) {
+                        for (const annotation of modifier.children.annotation) {
+                          if (annotation.location && sourceText) {
+                            const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+                            if (annotationText.startsWith('@FunctionTool')) {
+                              hasFunctionToolAnnotation = true;
+                              log(`Found @FunctionTool annotation on method in class: ${className}`);
+                              break;
+                            }
+                          }
+                        }
+                        if (hasFunctionToolAnnotation) break;
+                      }
+                    }
+                    if (hasFunctionToolAnnotation) break;
+                  }
+                }
+              }
+            }
+
+            // Also check for @FunctionTool annotation on the class itself
+            if (!hasFunctionToolAnnotation && classDecl.children && classDecl.children.classModifier) {
+              for (const modifier of classDecl.children.classModifier) {
+                if (modifier.children && modifier.children.annotation) {
+                  for (const annotation of modifier.children.annotation) {
+                    if (annotation.location && sourceText) {
+                      const annotationText = extractSourceAtLocation(sourceText, annotation.location);
+                      if (annotationText.startsWith('@FunctionTool')) {
+                        hasFunctionToolAnnotation = true;
+                        log(`Found @FunctionTool annotation on class: ${className}`);
+                        break;
+                      }
+                    }
+                  }
+                  if (hasFunctionToolAnnotation) break;
+                }
+              }
+            }
+
+            if (hasFunctionToolAnnotation) {
+              log(`Adding function tool class: ${className}`);
+              functionToolClasses.push({
+                className: className,
+                componentType: 'FunctionTool',
+                filename: filename,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  log(`Found ${functionToolClasses.length} function tool classes:`);
+  functionToolClasses.forEach((toolClass, index) => {
+    log(`  ${index + 1}. ${toolClass.className} (${toolClass.componentType})`);
+  });
+
+  log(`========================================`);
+  log(`FUNCTION TOOL CLASS DETECTION COMPLETE`);
+  log(`========================================`);
+
+  return functionToolClasses;
 }

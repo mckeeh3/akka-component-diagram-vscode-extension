@@ -220,6 +220,7 @@ export class JavaParser {
     }> = [];
     const akkaSuperclasses = ['Agent', 'EventSourcedEntity', 'KeyValueEntity', 'View', 'Consumer', 'Workflow', 'TimedAction'];
     const endpointAnnotations = ['HttpEndpoint', 'GrpcEndpoint', 'MCPEndpoint'];
+    const toolAnnotations = ['FunctionTool'];
 
     function extractStringValueFromElementValue(ev: any): string {
       if (!ev) return '';
@@ -241,31 +242,31 @@ export class JavaParser {
                     return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
                   }
                 }
+                // Fallback: Look for literal inside primary
+                if (primary.children && primary.children.literal && primary.children.literal[0]) {
+                  const literal = primary.children.literal[0];
+                  if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
+                    const stringLiteral = literal.children.StringLiteral[0];
+                    return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
+                  }
+                }
               }
-              // Fallback: Look for literal inside primary
-              if (primary.children && primary.children.literal && primary.children.literal[0]) {
-                const literal = primary.children.literal[0];
+              // Fallback: Look for literal inside unaryExpression
+              if (unary.children && unary.children.literal && unary.children.literal[0]) {
+                const literal = unary.children.literal[0];
                 if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
                   const stringLiteral = literal.children.StringLiteral[0];
                   return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
                 }
               }
             }
-            // Fallback: Look for literal inside unaryExpression
-            if (unary.children && unary.children.literal && unary.children.literal[0]) {
-              const literal = unary.children.literal[0];
+            // Fallback: Look for literal directly inside binaryExpression
+            if (binary.children && binary.children.literal && binary.children.literal[0]) {
+              const literal = binary.children.literal[0];
               if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
                 const stringLiteral = literal.children.StringLiteral[0];
                 return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
               }
-            }
-          }
-          // Fallback: Look for literal directly inside binaryExpression
-          if (binary.children && binary.children.literal && binary.children.literal[0]) {
-            const literal = binary.children.literal[0];
-            if (literal.children && literal.children.StringLiteral && literal.children.StringLiteral[0]) {
-              const stringLiteral = literal.children.StringLiteral[0];
-              return stringLiteral.image ? stringLiteral.image.replace(/^"|"$/g, '') : '';
             }
           }
         }
@@ -300,6 +301,8 @@ export class JavaParser {
         let componentIdValue = '';
         let endpointType = '';
         let endpointValue = '';
+        let hasFunctionTool = false;
+        let toolName = '';
 
         // Extract class name
         if (n.children && n.children.normalClassDeclaration && n.children.normalClassDeclaration[0]) {
@@ -365,6 +368,25 @@ export class JavaParser {
                   if (!endpointValue) {
                     endpointValue = annotationName.toLowerCase();
                   }
+                } else if (toolAnnotations.includes(annotationName)) {
+                  hasFunctionTool = true;
+                  // Extract tool name from annotation if provided
+                  if (annotation.children && annotation.children.elementValue) {
+                    const ev = annotation.children.elementValue[0];
+                    const stringValue = extractStringValueFromElementValue(ev);
+                    toolName = stringValue || className;
+                  } else if (annotation.children && annotation.children.elementValuePairList) {
+                    const pairs = annotation.children.elementValuePairList;
+                    const namePair = pairs.find((pair: any) => pair.children && pair.children.Identifier && pair.children.Identifier[0] && pair.children.Identifier[0].image === 'name');
+                    if (namePair && namePair.children && namePair.children.elementValue) {
+                      const ev = namePair.children.elementValue[0];
+                      const stringValue = extractStringValueFromElementValue(ev);
+                      toolName = stringValue || className;
+                    }
+                  }
+                  if (!toolName) {
+                    toolName = className;
+                  }
                 }
               }
             }
@@ -387,6 +409,15 @@ export class JavaParser {
             className,
             componentType: endpointType,
             componentId: endpointValue,
+          });
+        }
+        // Add tool-based component if it has FunctionTool annotation
+        if (hasFunctionTool && toolName) {
+          components.push({
+            filename,
+            className,
+            componentType: 'FunctionTool',
+            componentId: toolName,
           });
         }
       }

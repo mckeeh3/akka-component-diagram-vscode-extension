@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+     This is a logback include file. 
+
+     Add here the loggers you would like to have for your application during development and testing.
+     To define loggers for production mode use 'include-loggers.xml'
+
+     The loggers you define inside the <included> tag will be added to the final log configuration 
+     when the application runs. 
+ -->
+<included>
+    <logger name="io.example" level="DEBUG"/>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- encoders are assigned the type
+             ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+        <encoder>
+            <Pattern>%yellow(%d{YYYY-MM-dd HH:mm:ss.SSS}) %blue(%-5level) %green(%-15.15thread) %cyan(%logger{25}): %msg%n</Pattern>
+        </encoder>
+    </appender>
+    <root level="debug">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</included>

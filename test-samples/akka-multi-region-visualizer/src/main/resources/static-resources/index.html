@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Akka Multi-Region Visualizer Demo</title>
+    <link rel="stylesheet" href="index.css" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <div id="info-panel">
+      <div>Region: <span id="region-name">Not connected</span></div>
+      <div>SSE Status: <span id="connection-status">Disconnected</span></div>
+      <div><a href="help.html" style="color: #a7ecff; text-decoration: none">Help</a></div>
+      <div id="project-version" style="position: absolute; top: 10px; right: 20px; color: #a7ecff; font-size: 1.1em; font-family: monospace"></div>
+    </div>
+
+    <div id="grid-system">
+      <div id="grid-summary-container">
+        <div id="grid-summary">Total: 0, R: 0, G: 0, B: 0, Y: 0</div>
+        <div style="display: flex; align-items: center; justify-content: flex-end; flex: 1">
+          <div id="grid-position">Grid Position: x=0, y=0</div>
+          <!-- mouse position will be inserted here by JS -->
+        </div>
+      </div>
+      <div id="left-axis"></div>
+      <div id="grid-container"></div>
+      <div id="bottom-axis"></div>
+      <div id="corner-spacer"></div>
+    </div>
+
+    <script src="index.js" defer></script>
+  </body>
+</html>
