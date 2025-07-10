@@ -10,7 +10,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:akka-diagram-generator.scanProject",
     "onCommand:akka-diagram-generator.generateCstDiagram",
     "onCommand:akka-diagram-generator.generateMermaidDiagram"
   ],
@@ -34,10 +33,6 @@
     },
     "commands": [
       {
-        "command": "akka-diagram-generator.scanProject",
-        "title": "Akka: Scan Project"
-      },
-      {
         "command": "akka-diagram-generator.generateCstDiagram",
         "title": "Akka: Generate Component Diagram"
       },
@@ -54,11 +49,6 @@
       "explorer/context": [
         {
           "when": "resourceLangId == java || explorerResourceIsFolder",
-          "command": "akka-diagram-generator.scanProject",
-          "group": "navigation"
-        },
-        {
-          "when": "resourceLangId == java || explorerResourceIsFolder",
           "command": "akka-diagram-generator.generateCstDiagram",
           "group": "navigation"
         },
@@ -69,9 +59,6 @@
         }
       ],
       "commandPalette": [
-        {
-          "command": "akka-diagram-generator.scanProject"
-        },
         {
           "command": "akka-diagram-generator.generateMermaidDiagram"
         }
