@@ -57,7 +57,7 @@ let currentCstDiagramPanel: vscode.WebviewPanel | undefined;
  * Find the exact location of a class in a Java file using CST parsing
  */
 async function findClassLocation(className: string, fileUri: vscode.Uri, outputChannel?: vscode.OutputChannel): Promise<vscode.Position | null> {
-  const log = outputChannel ? createPrefixedLogger(outputChannel, '[Navigation]') : null;
+  const log = createPrefixedLogger(outputChannel, '[Navigation]');
 
   try {
     log?.('Finding class location for:', className, 'in file:', fileUri.fsPath);
@@ -242,7 +242,6 @@ export function activate(context: vscode.ExtensionContext) {
         log(`No Akka components found in the project`);
       }
     } catch (error) {
-      console.error('[Extension] Error in command "akka-diagram-generator.generateCstDiagram"', error);
       log(`ERROR: ${error}`);
       log(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
       vscode.window.showErrorMessage('An error occurred while generating the CST diagram.');
@@ -503,7 +502,6 @@ export function activate(context: vscode.ExtensionContext) {
       log(`Mermaid diagram generated with ${allNodes.length} nodes and ${aggregatedEdges.length} edges`);
       log(`Diagram saved to: ${targetDocument.fileName}`);
     } catch (error) {
-      console.error('[Extension] Error in command "akka-diagram-generator.generateMermaidDiagram"', error);
       log(`ERROR: ${error}`);
       log(`Error stack: ${error instanceof Error ? error.stack : 'No stack trace'}`);
       vscode.window.showErrorMessage('An error occurred while generating the Mermaid diagram.');

@@ -22,7 +22,7 @@ export class ComponentDiagramController {
   private log: (message: string) => void;
 
   constructor(outputChannel?: vscode.OutputChannel) {
-    this.log = outputChannel ? createPrefixedLogger(outputChannel, '[Controller]') : console.log;
+    this.log = createPrefixedLogger(outputChannel, '[Controller]');
   }
 
   /**

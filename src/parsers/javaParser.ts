@@ -19,7 +19,7 @@ export class JavaParser {
    * Parse a single Java source file
    */
   static async parseFile(fileUri: vscode.Uri, outputChannel?: vscode.OutputChannel): Promise<ParseResult> {
-    const log = outputChannel ? createPrefixedLogger(outputChannel, '[JavaParser]') : console.log;
+    const log = createPrefixedLogger(outputChannel, '[JavaParser]');
     const filename = fileUri.fsPath;
     log(`Starting to parse file: ${filename}`);
 
@@ -57,7 +57,7 @@ export class JavaParser {
    * Parse multiple Java source files
    */
   static async parseFiles(files: vscode.Uri[], outputChannel?: vscode.OutputChannel): Promise<ParseResult[]> {
-    const log = outputChannel ? createPrefixedLogger(outputChannel, '[JavaParser]') : console.log;
+    const log = createPrefixedLogger(outputChannel, '[JavaParser]');
     log(`Starting to parse ${files.length} Java files`);
 
     const results: ParseResult[] = [];

@@ -44,8 +44,7 @@ export function extractComponentConnectionsFromCST(
   outputChannel?: vscode.OutputChannel,
   allComponents?: Array<{ className: string; componentType: string }>
 ) {
-  console.log('[DEBUG] Top of extractComponentConnectionsFromCST');
-  const log = outputChannel ? createPrefixedLogger(outputChannel, '[CSTUtils]') : console.log;
+  const log = createPrefixedLogger(outputChannel, '[CSTUtils]');
 
   log('[DEBUG] Top of extractComponentConnectionsFromCST');
   log(`========================================`);
@@ -1181,7 +1180,7 @@ export function extractComponentConnectionsFromCST(
 
 // Helper: detect function tool classes from CST
 export function detectFunctionToolClasses(cst: any, filename: string, sourceText?: string, outputChannel?: vscode.OutputChannel) {
-  const log = outputChannel ? createPrefixedLogger(outputChannel, '[FunctionToolDetection]') : console.log;
+  const log = createPrefixedLogger(outputChannel, '[FunctionToolDetection]');
 
   log(`========================================`);
   log(`DETECTING FUNCTION TOOL CLASSES FOR: ${filename}`);
