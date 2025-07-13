@@ -223,6 +223,14 @@ export class ComponentDiagramController {
 
       // Add edges
       connections.forEach((conn: any) => {
+        // Filter out references edges that already have existing matching source and target nodes
+        if (conn.label === 'references') {
+          const existingEdge = allEdges.find((e) => e.source === conn.source && e.target === conn.target);
+          if (existingEdge) {
+            return;
+          }
+        }
+
         const edge: AkkaEdge = {
           source: conn.source,
           target: conn.target,

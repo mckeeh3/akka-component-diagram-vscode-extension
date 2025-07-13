@@ -1,5 +1,5 @@
-import { parse } from 'java-parser';
-import { AkkaComponent, AkkaEdge } from '../models/types';
+// import { parse } from 'java-parser';
+// import { AkkaComponent, AkkaEdge } from '../models/types';
 import * as vscode from 'vscode';
 import { createPrefixedLogger } from '../utils/logger';
 
@@ -47,9 +47,9 @@ export function extractComponentConnectionsFromCST(
   const log = createPrefixedLogger(outputChannel, '[CSTUtils]');
 
   log('[DEBUG] Top of extractComponentConnectionsFromCST');
-  log(`========================================`);
+  log('========================================');
   log(`STARTING CST-BASED EDGE DETECTION FOR: ${filename}`);
-  log(`========================================`);
+  log('========================================');
   log(`All components available for reference detection: ${allComponents ? allComponents.length : 0}`);
   if (allComponents && allComponents.length > 0) {
     allComponents.forEach((comp, index) => {
@@ -85,13 +85,13 @@ export function extractComponentConnectionsFromCST(
   // Helper: find injected ComponentClient field names in the class
   function findComponentClientFieldNames(classBodyDecls: any[]): string[] {
     const fieldNames: string[] = [];
-    log(`Finding ComponentClient field names in class body declarations...`);
+    log('Finding ComponentClient field names in class body declarations...');
 
     // 1. Find constructor(s)
     for (const bodyDecl of classBodyDecls) {
       if (bodyDecl.children && bodyDecl.children.constructorDeclaration) {
         const ctor = bodyDecl.children.constructorDeclaration[0];
-        log(`Found constructor, checking parameters...`);
+        log('Found constructor, checking parameters...');
 
         // Find parameters
         if (ctor.children.constructorDeclarator && ctor.children.constructorDeclarator[0].children.formalParameterList) {
@@ -165,7 +165,7 @@ export function extractComponentConnectionsFromCST(
 
                 // Now, look for assignments in the constructor body: this.FIELD = paramName;
                 if (ctor.children.constructorBody && ctor.children.constructorBody[0].children.blockStatements) {
-                  log(`Checking constructor body for field assignments...`);
+                  log('Checking constructor body for field assignments...');
 
                   for (const blockStmt of ctor.children.constructorBody[0].children.blockStatements) {
                     if (blockStmt.children && blockStmt.children.blockStatement) {
@@ -203,7 +203,7 @@ export function extractComponentConnectionsFromCST(
 
     // Fallback: if no field names found, try to find any field that might be a ComponentClient
     if (fieldNames.length === 0) {
-      log(`No ComponentClient field names found with constructor detection, trying fallback...`);
+      log('No ComponentClient field names found with constructor detection, trying fallback...');
       for (const bodyDecl of classBodyDecls) {
         if (bodyDecl.children && bodyDecl.children.fieldDeclaration) {
           const fieldDecl = bodyDecl.children.fieldDeclaration[0];
@@ -246,7 +246,7 @@ export function extractComponentConnectionsFromCST(
     if (fieldNames.length > 0) {
       log(`ComponentClient field names found: ${fieldNames.join(', ')}`);
     } else {
-      log(`No ComponentClient field names found`);
+      log('No ComponentClient field names found');
     }
     return fieldNames;
   }
@@ -277,7 +277,7 @@ export function extractComponentConnectionsFromCST(
                       const toolArgs = toolsMatch[1].split(',').map((arg) => arg.trim());
                       for (const arg of toolArgs) {
                         // Handle different tool argument patterns
-                        let toolName = arg.replace(/\.class$/, '');
+                        const toolName = arg.replace(/\.class$/, '');
 
                         // Handle List.of() patterns with multiple tool instances
                         if (toolName.includes('List.of(')) {
@@ -394,7 +394,7 @@ export function extractComponentConnectionsFromCST(
                       log(`Found component client field: ${varName}`);
                       // Walk the primarySuffix chain
                       const suffixes = primary.children.primarySuffix || [];
-                      let chain = [];
+                      const chain = [];
 
                       // Extract the first method name from primaryPrefix.fqnOrRefType.fqnOrRefTypePartRest
                       if (prefix.children && prefix.children.fqnOrRefType) {
@@ -486,17 +486,17 @@ export function extractComponentConnectionsFromCST(
                         }
 
                         if (methodInv) {
-                          log(`Found method invocation, checking for argument list...`);
+                          log('Found method invocation, checking for argument list...');
                           log(`Method invocation children: ${JSON.stringify(Object.keys(methodInv.children || {}))}`);
 
                           if (methodInv.children && methodInv.children.argumentList) {
                             const argList = methodInv.children.argumentList[0];
-                            log(`Found argument list, checking for expressions...`);
+                            log('Found argument list, checking for expressions...');
                             log(`Argument list children: ${JSON.stringify(Object.keys(argList.children || {}))}`);
 
                             if (argList.children && argList.children.expression) {
                               const expr = argList.children.expression[0];
-                              log(`Found expression in argument list`);
+                              log('Found expression in argument list');
                               log(`Expression children: ${JSON.stringify(Object.keys(expr.children || {}))}`);
 
                               // Use the location offsets to extract the method parameter directly from source text
@@ -523,11 +523,11 @@ export function extractComponentConnectionsFromCST(
                                     log(`Parts after split: ${JSON.stringify(parts)}`);
                                   }
                                 } else {
-                                  log(`No source text provided, cannot extract method name`);
+                                  log('No source text provided, cannot extract method name');
                                 }
                               }
                             } else {
-                              log(`No expression found in argument list`);
+                              log('No expression found in argument list');
                               // Try to find the method reference in a different way
                               if (argList.children) {
                                 log(`Available children in argument list: ${JSON.stringify(Object.keys(argList.children))}`);
@@ -556,7 +556,7 @@ export function extractComponentConnectionsFromCST(
                             }
                           }
                         } else {
-                          log(`No method invocation found in suffixes`);
+                          log('No method invocation found in suffixes');
                         }
 
                         // Method name extraction is now done in the same loop where we find the class name
@@ -599,7 +599,7 @@ export function extractComponentConnectionsFromCST(
   function findComponentReferences(cst: any, allComponents: Array<{ className: string; componentType: string }>, className: string) {
     log(`[DEBUG] Entered findComponentReferences for class: ${className}`);
     if (!cst || !allComponents || allComponents.length === 0) {
-      log(`[Component Reference Detection] Skipping - no CST or components available`);
+      log('[Component Reference Detection] Skipping - no CST or components available');
       return;
     }
 
@@ -905,10 +905,10 @@ export function extractComponentConnectionsFromCST(
             }
           }
         } else {
-          log(`No source text provided, cannot extract annotation`);
+          log('No source text provided, cannot extract annotation');
         }
       } else {
-        log(`No location information available for annotation`);
+        log('No location information available for annotation');
       }
     }
   }
@@ -932,7 +932,7 @@ export function extractComponentConnectionsFromCST(
             // Match all key = "value" pairs inside the annotation
             const paramRegex = /(\w+)\s*=\s*"([^"]+)"/g;
             let match;
-            let params: Record<string, string> = {};
+            const params: Record<string, string> = {};
             while ((match = paramRegex.exec(annotationText)) !== null) {
               params[match[1]] = match[2];
             }
@@ -984,7 +984,7 @@ export function extractComponentConnectionsFromCST(
           }
         }
       } else {
-        log(`No location information available for annotation`);
+        log('No location information available for annotation');
       }
     }
   }
@@ -1049,7 +1049,7 @@ export function extractComponentConnectionsFromCST(
           }
         }
       } else {
-        log(`No location information available for annotation`);
+        log('No location information available for annotation');
       }
     }
   }
@@ -1071,17 +1071,17 @@ export function extractComponentConnectionsFromCST(
 
           if (className) {
             log(`[DEBUG] Entering className block for: ${className}`);
-            log(`========================================`);
+            log('========================================');
             log(`PROCESSING CLASS: ${className}`);
-            log(`========================================`);
+            log('========================================');
 
-            log(`--- Stage 1: Function Tool Annotations ---`);
+            log('--- Stage 1: Function Tool Annotations ---');
             findFunctionToolAnnotations(classBodyDecls, className);
-            log(`--- Stage 1 Complete ---`);
+            log('--- Stage 1 Complete ---');
 
-            log(`--- Stage 2: Tool Field Declarations ---`);
+            log('--- Stage 2: Tool Field Declarations ---');
             findToolFieldDeclarations(classBodyDecls, className);
-            log(`--- Stage 2 Complete ---`);
+            log('--- Stage 2 Complete ---');
 
             // Component reference detection will be done after all components are detected
           }
@@ -1105,22 +1105,22 @@ export function extractComponentConnectionsFromCST(
   }
 
   // Extract all annotations and process consume, topic, and service stream annotations
-  log(`========================================`);
-  log(`STAGE 4: ANNOTATION PROCESSING`);
-  log(`========================================`);
-  log(`Extracting all annotations from CST...`);
+  log('========================================');
+  log('STAGE 4: ANNOTATION PROCESSING');
+  log('========================================');
+  log('Extracting all annotations from CST...');
   const allAnnotations = extractAllAnnotations(cst);
   log(`Found ${allAnnotations.length} total annotations`);
   extractConsumeAnnotationsFromList(allAnnotations);
   extractTopicAnnotationsFromList(allAnnotations);
   extractServiceStreamAnnotationsFromList(allAnnotations);
   findToolClassDefinitions(cst);
-  log(`--- Stage 4 Complete ---`);
+  log('--- Stage 4 Complete ---');
 
   // Stage 5: Component Reference Detection (after all components are detected)
-  log(`========================================`);
-  log(`STAGE 5: COMPONENT REFERENCE DETECTION`);
-  log(`========================================`);
+  log('========================================');
+  log('STAGE 5: COMPONENT REFERENCE DETECTION');
+  log('========================================');
 
   // Build complete list of all components including function tools
   const allComponentsForReference = [...(allComponents || [])];
@@ -1156,20 +1156,20 @@ export function extractComponentConnectionsFromCST(
     });
   }
 
-  log(`--- Stage 5 Complete ---`);
+  log('--- Stage 5 Complete ---');
 
   // Final results summary
-  log(`========================================`);
+  log('========================================');
   log(`CST-BASED EDGE DETECTION COMPLETE FOR: ${filename}`);
-  log(`========================================`);
-  log(`Final Results:`);
+  log('========================================');
+  log('Final Results:');
   log(`  - Connections found: ${connections.length}`);
   log(`  - Topic nodes found: ${topicNodes.length}`);
   log(`  - Service stream nodes found: ${serviceStreamNodes.length}`);
   log(`  - Tool nodes found: ${toolNodes.length}`);
 
   if (connections.length > 0) {
-    log(`  - Connection details:`);
+    log('  - Connection details:');
     connections.forEach((conn, index) => {
       log(`    ${index + 1}. ${conn.source} -> ${conn.target} (${conn.label})`);
     });
@@ -1182,20 +1182,20 @@ export function extractComponentConnectionsFromCST(
 export function detectFunctionToolClasses(cst: any, filename: string, sourceText?: string, outputChannel?: vscode.OutputChannel) {
   const log = createPrefixedLogger(outputChannel, '[FunctionToolDetection]');
 
-  log(`========================================`);
+  log('========================================');
   log(`DETECTING FUNCTION TOOL CLASSES FOR: ${filename}`);
-  log(`========================================`);
+  log('========================================');
 
   const functionToolClasses: Array<{ className: string; componentType: string; filename: string }> = [];
 
   if (!cst.children || !cst.children.ordinaryCompilationUnit) {
-    log(`No compilation unit found in CST`);
+    log('No compilation unit found in CST');
     return functionToolClasses;
   }
 
   const compilationUnit = cst.children.ordinaryCompilationUnit[0];
   if (!compilationUnit.children || !compilationUnit.children.typeDeclaration) {
-    log(`No type declarations found in compilation unit`);
+    log('No type declarations found in compilation unit');
     return functionToolClasses;
   }
 
@@ -1217,7 +1217,7 @@ export function detectFunctionToolClasses(cst: any, filename: string, sourceText
         }
 
         if (!className) {
-          log(`Could not extract class name from class declaration`);
+          log('Could not extract class name from class declaration');
           continue;
         }
 
@@ -1297,9 +1297,9 @@ export function detectFunctionToolClasses(cst: any, filename: string, sourceText
     log(`  ${index + 1}. ${toolClass.className} (${toolClass.componentType})`);
   });
 
-  log(`========================================`);
-  log(`FUNCTION TOOL CLASS DETECTION COMPLETE`);
-  log(`========================================`);
+  log('========================================');
+  log('FUNCTION TOOL CLASS DETECTION COMPLETE');
+  log('========================================');
 
   return functionToolClasses;
 }
