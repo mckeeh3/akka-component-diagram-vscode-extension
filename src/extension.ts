@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { getWebviewContent } from './webview/webviewManager';
 import { JavaParser } from './parsers/javaParser';
-import { extractComponentConnectionsFromCST, extractSourceAtLocation } from './parsers/javaCstUtils';
+import { extractComponentConnectionsFromCST } from './parsers/javaCstUtils';
 import { AkkaComponent, AkkaEdge, SerializableDiagramData, ViewState } from './models/types';
 import { createPrefixedLogger } from './utils/logger';
-import { generateMermaidDiagram, generateSimpleMermaidDiagram } from './utils/mermaidGenerator';
+import { generateMermaidDiagram } from './utils/mermaidGenerator';
 import { ComponentDiagramController } from './parsers/componentDiagramController';
 
 // Helper function to aggregate CST edges
@@ -231,7 +231,8 @@ export function activate(context: vscode.ExtensionContext) {
         ...savedCstNodeLayout[node.id], // Apply saved coordinates if they exist
       }));
 
-      const cstDiagramData = { nodes: nodesWithLayout, edges: result.edges };
+      const aggregatedEdges = aggregateCstEdges(result.edges);
+      const cstDiagramData = { nodes: nodesWithLayout, edges: aggregatedEdges };
 
       // --- Create the CST Webview Panel ---
       if (cstDiagramData.nodes.length > 0) {
