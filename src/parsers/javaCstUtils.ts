@@ -450,7 +450,6 @@ export function extractComponentConnectionsFromCST(
                         // Find the method invocation that contains the method parameter
                         // The method parameter is typically in the 'method()' call, not the 'invoke()' call
                         let methodInv = null;
-                        let methodSuffixIndex = -1;
                         log(`Looking for method invocation in ${suffixes.length} suffixes...`);
 
                         // First, find the 'method' suffix that contains the method parameter
@@ -464,7 +463,6 @@ export function extractComponentConnectionsFromCST(
                               const prevMethod = suffixes[i - 1].children.Identifier[0].image;
                               if (prevMethod === 'method') {
                                 methodInv = methodSuffix;
-                                methodSuffixIndex = i;
                                 log(`Found method invocation in suffix ${i} (method call)`);
                                 break;
                               }
@@ -478,7 +476,6 @@ export function extractComponentConnectionsFromCST(
                             const suffix = suffixes[i];
                             if (suffix.children && suffix.children.methodInvocationSuffix) {
                               methodInv = suffix.children.methodInvocationSuffix[0];
-                              methodSuffixIndex = i;
                               log(`Found method invocation in suffix ${i} (fallback)`);
                               break;
                             }
@@ -603,6 +600,13 @@ export function extractComponentConnectionsFromCST(
       return;
     }
 
+    // Check if the current class is a view component - if so, skip reference detection
+    const currentComponent = allComponents.find((comp) => comp.className === className);
+    if (currentComponent && currentComponent.componentType.toLowerCase() === 'view') {
+      log(`[Component Reference Detection] Skipping reference detection for view component: ${className}`);
+      return;
+    }
+
     // Get all component class names for reference (including tool classes)
     const componentClassNames = allComponents.map((comp) => comp.className);
     log(`[Component Reference Detection] Looking for references to: ${componentClassNames.join(', ')}`);
@@ -629,7 +633,7 @@ export function extractComponentConnectionsFromCST(
         }
       }
       if (node.children) {
-        for (const [key, children] of Object.entries(node.children)) {
+        for (const [, children] of Object.entries(node.children)) {
           if (Array.isArray(children)) {
             for (const child of children) {
               if (child && typeof child === 'object') {
@@ -1145,7 +1149,6 @@ export function extractComponentConnectionsFromCST(
   if (cst.children && cst.children.ordinaryCompilationUnit && cst.children.ordinaryCompilationUnit[0].children.typeDeclaration) {
     cst.children.ordinaryCompilationUnit[0].children.typeDeclaration.forEach((typeDecl: any) => {
       if (typeDecl.children && typeDecl.children.classDeclaration && typeDecl.children.classDeclaration[0].children.normalClassDeclaration) {
-        const classDecl = typeDecl.children.classDeclaration[0];
         const className = getClassName(typeDecl);
 
         if (className && allComponentsForReference.length > 0) {
